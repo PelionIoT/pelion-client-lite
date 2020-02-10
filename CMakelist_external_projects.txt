@@ -1,0 +1,46 @@
+#this file can be used to checkout necessary build dependencies for cmake based mbed-cloud-client build.
+#CMakeGitCheckoutLib.cmake can be used to read hash from .lib file (or even full checkout path if needed)
+#CMakeGitCheckout.cmake can be used to checkout defined component without .lib file.
+
+set (CMAKE_GIT_CHECKOUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs/mbedtls)
+set (CMAKE_GIT_CLONE_ADDRESS https://github.com/ARMmbed/mbedtls.git)
+set (CMAKE_GIT_CHECKOUT_TAG mbedtls-2.17.0)
+include(CMakeGitCheckout.cmake)
+#some extra includes are needed from mbedtls to compile the device management client
+include_directories ("${CMAKE_GIT_CHECKOUT_DIR}/include")
+add_subdirectory(${CMAKE_GIT_CHECKOUT_DIR}) #mbed tls has its own cmake lets include it here
+
+set (CMAKE_GIT_CHECKOUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs/ns-hal-linux)
+set (CMAKE_GIT_CLONE_ADDRESS git@github.com:ARMmbed/ns-hal-linux.git)
+set (LIB_FILENAME ${CMAKE_CURRENT_SOURCE_DIR}/libs/ns-hal-linux.lib)
+include(CMakeGitCheckoutLib.cmake)
+
+set (CMAKE_GIT_CHECKOUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs/mbed-coap)
+set (CMAKE_GIT_CLONE_ADDRESS https://github.com/ARMmbed/mbed-coap.git)
+set (LIB_FILENAME ${CMAKE_CURRENT_SOURCE_DIR}/libs/mbed-coap.lib)
+include(CMakeGitCheckoutLib.cmake)
+
+set (CMAKE_GIT_CHECKOUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs/sal-stack-nanostack-eventloop)
+set (CMAKE_GIT_CLONE_ADDRESS git@github.com:ARMmbed/sal-stack-nanostack-eventloop.git)
+set (LIB_FILENAME ${CMAKE_CURRENT_SOURCE_DIR}/libs/sal-stack-nanostack-eventloop.lib)
+include(CMakeGitCheckoutLib.cmake)
+
+set (CMAKE_GIT_CHECKOUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs/mbed-trace)
+set (CMAKE_GIT_CLONE_ADDRESS git@github.com:ARMmbed/mbed-trace)
+set (LIB_FILENAME ${CMAKE_CURRENT_SOURCE_DIR}/libs/mbed-trace.lib)
+include(CMakeGitCheckoutLib.cmake)
+
+set (CMAKE_GIT_CHECKOUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs/mbed-client-randlib)
+set (CMAKE_GIT_CLONE_ADDRESS git@github.com:ARMmbed/mbed-client-randlib)
+set (LIB_FILENAME ${CMAKE_CURRENT_SOURCE_DIR}/libs/mbed-client-randlib.lib)
+include(CMakeGitCheckoutLib.cmake)
+
+set (CMAKE_GIT_CHECKOUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs/nanostack-libservice)
+set (CMAKE_GIT_CLONE_ADDRESS git@github.com:ARMmbed/nanostack-libservice)
+set (LIB_FILENAME ${CMAKE_CURRENT_SOURCE_DIR}/libs/nanostack-libservice.lib)
+include(CMakeGitCheckoutLib.cmake)
+
+set (CMAKE_GIT_CLONE_ADDRESS git@github.com:ARMmbed/kvstore-internal)
+set (CMAKE_GIT_CHECKOUT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs/KVStore)
+set (LIB_FILENAME ${CMAKE_CURRENT_SOURCE_DIR}/libs/KVStore.lib)
+include(CMakeGitCheckoutLib.cmake)

@@ -1,0 +1,8 @@
+build/*
+venv/*
+test/*
+test_common/*
+yotta_modules/*
+yotta_targets/*
+source/platform/linux/*
+source/platform/pal/*

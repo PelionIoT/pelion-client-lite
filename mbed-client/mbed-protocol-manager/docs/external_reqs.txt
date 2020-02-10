@@ -1,0 +1,7 @@
+#protoman_layer_pcap: (wireshark readable capture)
+libpcap
+libpcap-dev
+
+#protoman_test (json library)
+libjansson4
+libjansson-dev

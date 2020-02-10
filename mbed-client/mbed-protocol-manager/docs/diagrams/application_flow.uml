@@ -1,0 +1,28 @@
+@startuml
+
+Init: - protoman_create()
+Init: - protoman_add_predefined()
+Config: hostname, port,\ncertificates...
+Connect: protoman_connect()
+Connected: protoman_write()
+Connected: protoman_read()
+Disconnect: protoman_disconnect()
+Free: protoman_free()
+
+note right of Connect
+  Until connected,
+  PROTOMAN_WOULDBLOCK
+  is returned on read/write.
+end note
+
+[*] --> Init
+Init --> Config
+Config --> Connect
+Connect --> Connected
+Connected --> Disconnect
+Disconnect --> Disconnected
+Disconnected --> Connect
+Disconnected --> Free
+Free --> [*]
+
+@enduml
