@@ -1,0 +1,11 @@
+config/*
+docs/*
+doxygen/*
+test/*
+yotta_modules/*
+yotta_targets/*
+build/*
+test_modules/*
+source/platform/linux/*
+source/include/platform/linux/*
+

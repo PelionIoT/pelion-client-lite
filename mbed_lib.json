@@ -1,0 +1,31 @@
+{
+    "name": "mbed-cloud-client",
+ "config": {
+        "use-insecure-rot": null,
+        "storage-type": {
+            "help": "Select the storage type. KVSTORE is default choice. RAM is volatile storage and will not persist through reset, use it only for quick prototyping with developer certificates. EXTERNAL for other implementations.",
+            "accepted_values": ["KVSTORE", "RAM", "EXTERNAL"],
+            "value": "KVSTORE"
+        },
+        "storage-reset-dev-credentials": {
+            "help": "Always reset developer credentials when initializing. Only valid in developer mode.",
+            "accepted_values": [true, false],
+            "value": false
+        },
+        "update-download-protocol": {
+            "help": "Download over CoAP",
+            "accepted_values": ["MBED_CLOUD_CLIENT_UPDATE_DOWNLOAD_PROTOCOL_COAP"],
+            "value": "MBED_CLOUD_CLIENT_UPDATE_DOWNLOAD_PROTOCOL_COAP"
+        },
+        "update-storage": {
+            "help": "Storage option for update image. Common values: ARM_UCP_FLASHIAP and ARM_UCP_FLASHIAP_BLOCKDEVICE.",
+            "macro_name": "MBED_CLOUD_CLIENT_UPDATE_STORAGE",
+            "accepted_values": ["ARM_UCP_FLASHIAP", "ARM_UCP_FLASHIAP_BLOCKDEVICE"],
+            "value": null
+        }
+    },
+    "macros" : [
+        "ARM_UC_PROFILE_NANO_CLIENT=1",
+        "SN_COAP_REDUCE_BLOCKWISE_HEAP_FOOTPRINT=1"
+    ]
+}

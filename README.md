@@ -4,3 +4,6 @@ This repository contains Pelion Device Management Client Lite: a library that co
 
 Report your concerns about the documentation or the software as issues in the [Pelion Client Lite repository](https://github.com/ARMmbed/pelion-client-lite/issues).
 
+
+ 
+
