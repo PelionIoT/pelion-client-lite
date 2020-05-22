@@ -46,6 +46,7 @@ static int _do_connect(struct protoman_layer_s *layer);
 static int _do_write(struct protoman_layer_s *layer);
 static int _do_read(struct protoman_layer_s *layer);
 static int _do_disconnect(struct protoman_layer_s *layer);
+//static int _do_pause(struct protoman_layer_s *layer);
 static void layer_free(struct protoman_layer_s *layer);
 /* macro's for checking defines */
 #define MAKE_CHECK_T( X ) X ## _check
@@ -89,7 +90,9 @@ static const struct protoman_layer_callbacks_s callbacks = {
     &_do_connect,
     &_do_read,
     &_do_write,
-    &_do_disconnect
+    &_do_disconnect,
+    NULL, // &_do_pause
+    NULL  // &_do_resume
 };
 
 void protoman_add_layer_mbedtls(struct protoman_s *protoman, struct protoman_layer_s *layer)
@@ -121,9 +124,25 @@ static void _wrapper_print(void *ctx, int level, const char *file, int line, con
 {
 #ifdef PROTOMAN_VERBOSE
     struct protoman_layer_s *layer = ctx;
+
+    const char *pos = strrchr(file, '/');
+
+    int str_len = (int)strlen(str);
+    if ((str_len > 0) && (str[str_len - 1] == '\n')) {
+        // Strip the trailing 'LF' added by mbedtls' debug macro so there will not be empty lines
+        // between trace lines as the mbed-trace also adds a linefeed.
+        str_len--;
+    }
+    protoman_verbose("%s:%04d: %.*s", pos == NULL ? file : pos, line, str_len, str);
+    // Get rid of warnings in case tracing disabled or not at specific level
+    (void)pos;
+    (void)str_len;
 #endif
-    ((void) level);
-    protoman_verbose("mbedtls(), %s, %.*s", file, (int)strlen(str) - 1, str);
+    (void)ctx;
+    (void)level;
+    (void)file;
+    (void)line;
+    (void)str;
 }
 #endif
 
@@ -336,17 +355,18 @@ static int _do_configuration(struct protoman_layer_s *layer)
 #if defined(MBEDTLS_SSL_PROTO_DTLS)
     /* Set packet/fragment size options to make sure the TLS packets fit in our data buffers. */
     mbedtls_ssl_set_mtu(&layer_mbedtls_common->ssl, PROTOMAN_MTU);
+    protoman_debug("Setting ssl mtu: %d", PROTOMAN_MTU);
 #endif // MBEDTLS_SSL_PROTO_DTLS
 
 #if defined(MBEDTLS_SSL_MAX_FRAGMENT_LENGTH)
+    protoman_debug("Setting ssl max_content_len: %d, max_frag_len: %d", MBEDTLS_SSL_MAX_CONTENT_LEN, PROTOMAN_LAYER_MBEDTLS_MAX_FRAG_LEN);
+
     retval = mbedtls_ssl_conf_max_frag_len(&layer_mbedtls_common->conf, PROTOMAN_LAYER_MBEDTLS_MAX_FRAG_LEN);
     if (retval != 0) {
         protoman_err("mbedtls_ssl_conf_max_frag_len() failed with %d", retval);
         protoman_layer_record_error(layer, PROTOMAN_ERR_INVALID_INPUT, retval, protoman_strmbedtls(retval));
         return PROTOMAN_STATE_RETVAL_ERROR;
     }
-
-    protoman_debug("Setting MTU: %d, and max_frag_len: %d", PROTOMAN_MTU, PROTOMAN_LAYER_MBEDTLS_MAX_FRAG_LEN);
 #endif // MBEDTLS_SSL_MAX_FRAGMENT_LENGTH
 
     /*  Setup */
@@ -357,8 +377,9 @@ static int _do_configuration(struct protoman_layer_s *layer)
         return PROTOMAN_STATE_RETVAL_ERROR;
     }
 
-#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+#if defined(MBEDTLS_SSL_DTLS_CONNECTION_ID) && defined(MBEDTLS_SSL_CID_ENABLED)
     if (protoman->config.is_dgram) {
+        protoman_debug("Setting cid enabled");
         retval = mbedtls_ssl_set_cid(&layer_mbedtls_common->ssl, MBEDTLS_SSL_CID_ENABLED, NULL, 0);
         if (retval != 0) {
             protoman_err("mbedtls_ssl_set_cid() failed with %d", retval);
@@ -559,8 +580,9 @@ static int _do_certificates(struct protoman_layer_s *layer)
         case PROTOMAN_IO_KEYBUF:
             protoman_debug("ownkey is PROTOMAN_IO_KEYBUF");
 
-/* device key in DER format */
-#ifndef PROTOMAN_USE_RAW_KEY
+#ifndef TLS_HANDSHAKE_USE_RAW_FORMAT_PRIVATE_KEY
+            /* device key in DER format */
+            
             size_t ownpass_len;
             /* No NULL check in strlen() */
             if (config_cert->ownpass) {
@@ -576,12 +598,27 @@ static int _do_certificates(struct protoman_layer_s *layer)
                 (const unsigned char *)config_cert->ownpass,
                 ownpass_len);
 
-/* device key in raw format with tinycrypto module used */
 #else
+            /* device key in RAW format */
+
+#if defined(MBEDTLS_PK_SINGLE_TYPE)
             /* Copy raw key to single pk_ctx buffer */
             PROTOMAN_MEMCPY(&layer_mbedtls_cert->ownkey.pk_ctx, config_cert->ownkey.buf, config_cert->ownkey.len);
             retval = 0;
-#endif
+#else
+            /* Parse raw key to pk_ctx */
+            retval = mbedtls_pk_setup(&layer_mbedtls_cert->ownkey, mbedtls_pk_info_from_type( MBEDTLS_PK_ECKEY ));
+            if (retval == 0) {
+                mbedtls_ecp_keypair *ecp = mbedtls_pk_ec(layer_mbedtls_cert->ownkey);
+                retval = mbedtls_ecp_group_load(&ecp->grp, MBEDTLS_ECP_DP_SECP256R1);
+                if (retval == 0) {
+                    retval = mbedtls_mpi_read_binary(&ecp->d, config_cert->ownkey.buf, config_cert->ownkey.len);
+                }
+            }
+#endif // MBEDTLS_PK_SINGLE_TYPE
+
+#endif // TLS_HANDSHAKE_USE_RAW_FORMAT_PRIVATE_KEY
+
             flow_control++;
             break;
 
@@ -642,7 +679,7 @@ static int _do_connect(struct protoman_layer_s *layer)
             if (MBEDTLS_SSL_HANDSHAKE_OVER == layer_mbedtls_common->ssl.state) {
                 protoman_info("mbedtls_ssl_handshake_step(), finish");
 
-#ifdef MBEDTLS_SSL_DTLS_CONNECTION_ID
+#if defined(MBEDTLS_SSL_DTLS_CONNECTION_ID) && defined(MBEDTLS_SSL_CID_ENABLED)
 #ifdef PROTOMAN_VERBOSE
                 if (layer->protoman->config.is_dgram) {
                     int enabled = 0;
@@ -912,7 +949,9 @@ static int _do_init(struct protoman_layer_s *layer)
         protoman_err("_do_certificates() or _do_psk() failed with %s", protoman_strstateretval(retval));
         return PROTOMAN_STATE_RETVAL_ERROR;
     }
-
+#if defined(MBEDTLS_SSL_CONF_RNG)
+    init_global_rng();
+#endif
     return retval;
 }
 
@@ -986,8 +1025,10 @@ static void store_ssl_session(struct protoman_layer_s *layer)
            (uint8_t*)&ssl_session.id, sizeof(ssl_session.id));
     PROTOMAN_MEMCPY(session_buffer + sizeof(ssl_session.id_len) + sizeof(ssl_session.id),
            (uint8_t*)&ssl_session.master, sizeof(ssl_session.master));
+#if !defined(MBEDTLS_SSL_CONF_SINGLE_CIPHERSUITE)
     PROTOMAN_MEMCPY(session_buffer + sizeof(ssl_session.id_len) + sizeof(ssl_session.id) + sizeof(ssl_session.master),
            (uint8_t*)&ssl_session.ciphersuite, sizeof(ssl_session.ciphersuite));
+#endif
 
     bool replace = false;
     size_t data_size = 0;
@@ -1042,7 +1083,9 @@ void load_ssl_session(struct protoman_layer_s *layer)
     PROTOMAN_MEMCPY(&ssl_session.id_len, ssl_session_buffer, sizeof(ssl_session.id_len));
     PROTOMAN_MEMCPY(&ssl_session.id, ssl_session_buffer + sizeof(ssl_session.id_len), sizeof(ssl_session.id));
     PROTOMAN_MEMCPY(&ssl_session.master, ssl_session_buffer + sizeof(ssl_session.id_len) + sizeof(ssl_session.id), sizeof(ssl_session.master));
+#if !defined(MBEDTLS_SSL_CONF_SINGLE_CIPHERSUITE)
     PROTOMAN_MEMCPY(&ssl_session.ciphersuite, ssl_session_buffer + sizeof(ssl_session.id_len) + sizeof(ssl_session.id) + sizeof(ssl_session.master), sizeof(ssl_session.ciphersuite));
+#endif
 
     if (mbedtls_ssl_set_session(&layer_mbedtls_common->ssl, &ssl_session) != 0) {
         protoman_err("mbedtls_ssl_set_session - failed!");

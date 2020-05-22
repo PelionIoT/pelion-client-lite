@@ -80,6 +80,13 @@ static ccs_status_e storage_get_parameter(cloud_client_param key, char *buffer, 
     return get_config_parameter(key, (uint8_t*)buffer, buffer_size, value_length);
 }
 
+#ifdef MBED_CONF_ZERO_COPY_CONFIG_STORE_ENABLED
+ccs_status_e storage_get_parameter_no_copy(cloud_client_param key, const uint8_t **buffer, size_t *value_length)
+{
+    return get_config_parameter_no_copy(key, buffer, value_length);
+}
+#endif
+
 static ccs_status_e storage_parameter_size(cloud_client_param field, size_t* size)
 {
     return size_config_parameter(field, size);
@@ -209,6 +216,7 @@ const void *storage_read_certificate(size_t *buffer_size, bool bootstrap)
             }
         }
     } else {
+#ifndef MBED_CONF_ZERO_COPY_CONFIG_STORE_ENABLED
         if (CCS_STATUS_SUCCESS == storage_parameter_size(LWM2M_DEVICE_CERTIFICATE, &lwm2m_certificate_size)) {
             lwm2m_free(lwm2m_certificate);
             lwm2m_certificate = lwm2m_alloc(lwm2m_certificate_size);
@@ -219,6 +227,12 @@ const void *storage_read_certificate(size_t *buffer_size, bool bootstrap)
                 lwm2m_free(lwm2m_certificate);
             }
         }
+#else
+        if (CCS_STATUS_SUCCESS == storage_get_parameter_no_copy(LWM2M_DEVICE_CERTIFICATE, &lwm2m_certificate, &lwm2m_certificate_size)) {
+            *buffer_size = lwm2m_certificate_size;
+            return lwm2m_certificate;
+        }
+#endif
     }
     tr_error("storage_read_certificate() failed");
     return NULL;
@@ -238,6 +252,7 @@ const void *storage_read_certificate_key(size_t *buffer_size, bool bootstrap)
             }
         }
     } else {
+
         if (CCS_STATUS_SUCCESS == storage_parameter_size(LWM2M_DEVICE_PRIVATE_KEY, &lwm2m_certificate_key_size)) {
             lwm2m_free(lwm2m_certificate_key);
             lwm2m_certificate_key = lwm2m_alloc(lwm2m_certificate_key_size);
@@ -267,6 +282,7 @@ const void *storage_read_ca_certificate(size_t *buffer_size, bool bootstrap)
             }
         }
     } else {
+#ifndef MBED_CONF_ZERO_COPY_CONFIG_STORE_ENABLED
         if (CCS_STATUS_SUCCESS == storage_parameter_size(LWM2M_SERVER_ROOT_CA_CERTIFICATE, &lwm2m_ca_certificate_size)) {
             lwm2m_free(lwm2m_ca_certificate);
             lwm2m_ca_certificate = lwm2m_alloc(lwm2m_ca_certificate_size);
@@ -277,6 +293,12 @@ const void *storage_read_ca_certificate(size_t *buffer_size, bool bootstrap)
                 lwm2m_free(lwm2m_ca_certificate);
             }
         }
+#else
+        if (CCS_STATUS_SUCCESS == storage_get_parameter_no_copy(LWM2M_SERVER_ROOT_CA_CERTIFICATE, &lwm2m_ca_certificate, &lwm2m_ca_certificate_size)) {
+            *buffer_size = lwm2m_ca_certificate_size;
+            return lwm2m_ca_certificate;
+        }
+#endif
     }
     tr_error("storage_read_ca_certificate() failed");
     return NULL;

@@ -38,6 +38,8 @@ static const struct protoman_layer_callbacks_s callbacks = {
     NULL,
     NULL,
     NULL,
+    NULL,
+    NULL,
     NULL
 };
 

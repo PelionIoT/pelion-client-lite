@@ -42,11 +42,14 @@ extern "C" {
 /* CLIENT_HELLO " " SSLKEYLOG_CLIENT_RANDOM_SIZE*2 + " " + SSLKEYLOG_MASTER_SECRET_SIZE*2 + \n + \0 */
 #define SSLKEYLOG_ENTRY_LEN (15 + SSLKEYLOG_CLIENT_RANDOM_SIZE*2 + SSLKEYLOG_MASTER_SECRET_SIZE*2 + 1 + 1)
 
-#if (PROTOMAN_MTU < 512 + 200)
-#error "PROTOMAN_MTU must be atleast 712"
+// The 512B+some slack fot DTLS header does work as MTU when DLTS fragmentation is enabled.
+#if (PROTOMAN_MTU < (512 + 28))
+#warning "PROTOMAN_MTU must be atleast 540"
 #endif
-#if (MBEDTLS_SSL_MAX_CONTENT_LEN < 512 + 200)
-#error "MBEDTLS_SSL_MAX_CONTENT_LEN must be atleast 712"
+#if (MBEDTLS_SSL_MAX_CONTENT_LEN < 512)
+// Note: current mbedtls does not work with 512 either, but going below that is not possible
+// due to protocol limit, so this check is still good to have to avoid silly mistakes.
+#error "MBEDTLS_SSL_MAX_CONTENT_LEN must be atleast 512"
 #endif
 
 // Make sure that blockwise size is correctly set to match fragmentation length paramater

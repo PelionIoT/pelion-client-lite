@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 ARM Limited. All rights reserved.
+ * Copyright (c) 2020 ARM Limited. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  * Licensed under the Apache License, Version 2.0 (the License); you may
  * not use this file except in compliance with the License.
@@ -112,11 +112,11 @@ typedef struct registry_observation_parameters_s {
  */
 
 void registry_set_path(registry_path_t *path,
-                       const int16_t object,
-                       const int16_t object_instance,
-                       const int16_t resource,
-                       const int16_t resource_instance,
-                       const int8_t type);
+                       const uint16_t object,
+                       const uint16_t object_instance,
+                       const uint16_t resource,
+                       const uint16_t resource_instance,
+                       const uint8_t type);
 
 /**
  * \brief Initialize a new registry. This function MUST be called before calling any other function.
@@ -385,7 +385,9 @@ registry_status_t registry_listen_events_stop(registry_t *registry, void *data_p
  *
  * \return REGISTRY_STATUS_OK Instance created.
  */
+#ifdef MBED_CLIENT_ENABLE_DYNAMIC_CREATION
 registry_status_t registry_add_instance(registry_t *registry, registry_path_t *path);
+#endif //MBED_CLIENT_ENABLE_DYNAMIC_CREATION
 
 /**
  * \brief Find out if the path exists in the registry.

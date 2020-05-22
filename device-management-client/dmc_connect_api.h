@@ -72,7 +72,7 @@ void pdmc_connect_init(uint8_t event_handler_id);
 /**
 * \brief Deinitialize Device Management Client.
 */
-void pdmc_connect_deinit();
+void pdmc_connect_deinit(void);
 
 /**
 * \brief Device Management Client registration. If necessary, initiates the internal update component and performs the bootstrap procedure automatically.
@@ -102,15 +102,15 @@ lwm2m_interface_t *pdmc_connect_get_interface(void);
 * \param registry A pointer to the registry (use `pdmc_connect_get_interface` after `pdmc_connect_init` to
 * get the registry from the interface's endpoint.
 * \param path The path to the Resource. This will be populated with parameters `object`, `object_instance` and `resource` given to this function call.
-* \param object Refers to the Object level in an OMA Object like "object/x/x/x", for example `300/0/0/0`.
-* \param object_instance Refers to the Object Instance level in an OMA Object like "x/object_instance/x/x", for example `300/1/0/0`.
-* \param resource Refers to the Resource level in OMA Object like "x/x/resource/x", for example `300/1/3/0`.
+* \param object Refers to the Object level in an OMA Object like "object/x/x", for example `300/0/0`.
+* \param object_instance Refers to the Object Instance level in an OMA Object like "x/object_instance/x", for example `300/1/0`.
+* \param resource Refers to the Resource level in OMA Object like "x/x/resource", for example `300/1/3`.
 * \param auto_observable Auto observable Resources are updated to the service side automatically.
 * \param callback A `registry_callback_t` type of a callback that will be notified on changes in a Resource.
 * \return `1` in success.
 */
 int pdmc_connect_add_cloud_resource(registry_t *registry, registry_path_t *path,
-                                        const int16_t object, const int16_t object_instance, const int16_t resource,
+                                        const uint16_t object, const uint16_t object_instance, const uint16_t resource,
                                         bool auto_observable, registry_callback_t callback);
 
 /**
@@ -128,7 +128,7 @@ bool pdmc_connect_endpoint_info(pdmc_endpoint_info_s *endpoint_info);
 * \note This operation does not deregister Device Management Client from Device Management.
 * It closes the socket and removes the interface from the interface list.
 */
-void pdmc_connect_pause();
+void pdmc_connect_pause(void);
 
 /**
  * \brief Resume Device Management Client's timed functionality and network connection

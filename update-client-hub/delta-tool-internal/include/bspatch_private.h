@@ -19,16 +19,15 @@
 #ifndef INCLUDE_BSPATCH_PRIVATE_H_
 #define INCLUDE_BSPATCH_PRIVATE_H_
 
-
 #include "bspatch.h"
+#include "common.h"
 
-/* Patch applied succesfully, but new file is not ready yet. User should re-fill patch buffer and call bspatch again. */
+/* Patch applied successfully, but new file is not ready yet. User should re-fill patch buffer and call bspatch again. */
 #define BSPATCH_NEED_MORE_PATCH_DATA 1
 
-/* Patch applied succesfully, and new file is fully written. */
+/* Patch applied successfully, and new file is fully written. */
 #define BSPATCH_DONE 0
-#define FILE_MAGIC "PELION/BSDIFF001"
-#define FILE_MAGIC_LEN (sizeof(FILE_MAGIC) - 1)
+
 
 #define CONTROL_LEN (8 * 3)
 #define FILE_HEADER_LEN (FILE_MAGIC_LEN + 24)
@@ -77,7 +76,7 @@ typedef enum {
 struct bspatch_stream {
 
     /* To be filled by ARM_BS_Init only thing used outside */
-    void* opaque;
+    void *opaque;
     read_patch_f read_patch;
     read_old_f read_old;
     seek_old_f seek_old;
@@ -93,8 +92,8 @@ struct bspatch_stream {
     int64_t i;
     int64_t ctrl[3];
 
-    uint8_t* nonCompressedDataBuffer; /* buffer for undeCompressBuffer bytes */
-    uint8_t* bufferForCompressedData; /* buffer to store deCompressBuffer frame for decompression */
+    uint8_t *nonCompressedDataBuffer; /* buffer for undeCompressBuffer bytes */
+    uint8_t *bufferForCompressedData; /* buffer to store deCompressBuffer frame for decompression */
 
     uint32_t progress;
     uint32_t new_size;
@@ -110,8 +109,8 @@ struct bspatch_stream {
     uint32_t isSignedVarInt;
 
 #if defined( BS_PATCH_COMPILE_TIME_MEMORY_ALLOC ) && (BS_PATCH_COMPILE_TIME_MEMORY_ALLOC>0)
-    int64_t bsMemoryBuffer[BS_PATCH_COMPILE_TIME_MEMORY_ALLOC/sizeof(int64_t)];  //
-    uint8_t allignmentBuffer[7+7]; // to allow space to alling to 8 byte boundary properly.
+    int64_t bsMemoryBuffer[BS_PATCH_COMPILE_TIME_MEMORY_ALLOC / sizeof(int64_t)]; //
+    uint8_t allignmentBuffer[7 + 7]; // to allow space to alling to 8 byte boundary properly.
 #endif
 };
 

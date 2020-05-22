@@ -1,0 +1,11 @@
+mbed-os/features/mbedtls/crypto/*
+mbed-os/features/mbedtls/targets/*
+mbed-os/features/mbedtls/inc/*
+mbed-os/features/mbedtls/src/*
+mbed-os/features/mbedtls/mbed-crypto/*
+mbed-cloud-client/mbedtls/src/x509_crl.c
+mbed-cloud-client/mbedtls/src/x509_crt.c
+mbed-cloud-client/mbedtls/src/x509_csr.c
+mbed-cloud-client/mbedtls/src/x509_create.c
+mbed-cloud-client/mbedtls/src/x509write_crt.c
+mbed-cloud-client/mbedtls/src/x509write_csr.c

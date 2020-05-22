@@ -26,13 +26,13 @@
 
 #include <string.h>
 #include <stdint.h>
-#include <varint.h>
+#include "varint.h"
 
 const unsigned char TOP_BIT_ON_BYTE = (128);
 const unsigned char TOP_BIT_OFF_BYTE = (127);
 
 // return 0 if decode completed otherwise 1 negative on error
-var_int_op_code decode_unsigned_varint(unsigned char varIntByte, uint64_t* varIntValue, int count)
+var_int_op_code decode_unsigned_varint(unsigned char varIntByte, uint64_t *varIntValue, int count)
 {
     var_int_op_code returnValue = OPERATION_COMPLETED;
 
@@ -112,7 +112,7 @@ int encode_signed_varint(int64_t value, unsigned char *buf, uint32_t BUFF_SIZE_M
     return pos;
 }
 
-var_int_op_code decode_signed_varint(unsigned char varIntByte, int64_t* varIntValue, int count)
+var_int_op_code decode_signed_varint(unsigned char varIntByte, int64_t *varIntValue, int count)
 {
     var_int_op_code returnValue = OPERATION_COMPLETED;
 
@@ -138,8 +138,7 @@ var_int_op_code decode_signed_varint(unsigned char varIntByte, int64_t* varIntVa
         returnValue = OPERATION_NEEDS_MORE_DATA;
     } else {
         returnValue = OPERATION_COMPLETED;
-        if (*varIntValue & 1)  // this is negative value
-                {
+        if (*varIntValue & 1) { // this is negative value
             *varIntValue >>= 1;
             *varIntValue = *varIntValue * -1;
         } else {

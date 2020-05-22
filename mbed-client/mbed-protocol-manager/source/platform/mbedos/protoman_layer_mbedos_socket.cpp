@@ -119,7 +119,9 @@ static const struct protoman_layer_callbacks_s callbacks = {
     &_do_connect,
     &_do_read,
     &_do_write,
-    &_do_disconnect
+    &_do_disconnect,
+    NULL,
+    NULL
 };
 
 #ifdef PROTOMAN_OFFLOAD_TLS

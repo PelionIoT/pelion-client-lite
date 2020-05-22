@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017 ARM Limited. All rights reserved.
+ * Copyright (c) 2017-2020 ARM Limited. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  * Licensed under the Apache License, Version 2.0 (the License); you may
  * not use this file except in compliance with the License.
@@ -160,7 +160,7 @@ void notifier_continue(notifier_t *notifier)
     registry_observation_parameters_t parameters;
 
     if(notifier->message_id &&
-      REGISTRY_STATUS_OK != registry_get_observation_parameters(&notifier->endpoint->registry, &notifier->last_notified, &parameters)) {
+      REGISTRY_STATUS_OK == registry_get_observation_parameters(&notifier->endpoint->registry, &notifier->last_notified, &parameters)) {
 
         if (parameters.sent) {
             parameters.sent = false;
@@ -282,11 +282,23 @@ static uint8_t notifier_check_lt_gt_st(registry_observation_parameters_t *parame
 #endif
 
         if (parameters->available.gt && value->value.int_value > parameters->gt) {
-                return 1;
+            return 1;
+        }
+
+        //Report if crossing threshold
+        if ((parameters->available.gt && parameters->available.previous_value) &&
+                (parameters->previous_value.int_value > parameters->gt && value->value.int_value <= parameters->gt)) {
+            return 1;
         }
 
         if (parameters->available.lt && value->value.int_value < parameters->lt) {
-                return 1;
+            return 1;
+        }
+
+        //Report if crossing threshold
+        if ((parameters->available.lt && parameters->available.previous_value) &&
+                (parameters->previous_value.int_value < parameters->lt && value->value.int_value >= parameters->lt)) {
+            return 1;
         }
 
         if (parameters->available.st && parameters->available.previous_value && llabs(parameters->previous_value.int_value - value->value.int_value) >= parameters->st) {
@@ -296,11 +308,23 @@ static uint8_t notifier_check_lt_gt_st(registry_observation_parameters_t *parame
     } else {
 
             if (parameters->available.gt && value->value.float_value > parameters->gt) {
-                    return 1;
+                return 1;
+            }
+
+            //Report if crossing threshold
+            if ((parameters->available.gt && parameters->available.previous_value) &&
+                    (parameters->previous_value.float_value > parameters->gt && value->value.float_value <= parameters->gt)) {
+                return 1;
             }
 
             if (parameters->available.lt && value->value.float_value < parameters->lt) {
-                    return 1;
+                return 1;
+            }
+
+            //Report if crossing threshold
+            if ((parameters->available.lt && parameters->available.previous_value) &&
+                    (parameters->previous_value.float_value < parameters->lt && value->value.float_value >= parameters->lt)) {
+                return 1;
             }
 
             if (parameters->available.st && parameters->available.previous_value && fabsf((parameters->previous_value.float_value - value->value.float_value)) >= parameters->st) {
@@ -766,17 +790,19 @@ void notifier_notification_sent(notifier_t *notifier, bool success, const regist
     notifier->block_notify = false;
 
     if (success) {
-        // Set time, set sent, try clear dirty.
+
+        // Set time, path.
         notifier_set_parameters(notifier, &parameters, path, notifier_get_current_time(notifier), NULL, NULL, 0, false, (-1), NULL);
         notifier_clear_dirty(notifier, path);
         notifier->notify_next = true;
-    }
 
-    if(REGISTRY_STATUS_OK != registry_get_observation_parameters(&notifier->endpoint->registry, path, &parameters)) {
+    } else if (REGISTRY_STATUS_OK == registry_get_observation_parameters(&notifier->endpoint->registry, path, &parameters)) {
+
         if (parameters.sent) {
             parameters.sent = false;
             registry_set_observation_parameters(&notifier->endpoint->registry, path, &parameters);
         }
+
     }
 
     send_queue_sent(notifier->endpoint, true);
@@ -867,6 +893,7 @@ static uint8_t notifier_get_observation_parameters(notifier_t *notifier, registr
             parameters->available.st |= parameters_available.st;
             parameters->available.pmin |= parameters_available.pmin;
             parameters->available.pmax |= parameters_available.pmax;
+            parameters->available.previous_value |= parameters_available.previous_value;
             parameters_available = parameters->available;
         }
 
@@ -1059,6 +1086,10 @@ void notifier_set_dirty(registry_t *registry, const registry_path_t *path)
     registry_path_t current_path = *path;
     registry_observation_parameters_t parameters;
     bool observed = false;
+    const lwm2m_resource_meta_definition_t* resdef;
+    if (REGISTRY_STATUS_OK != registry_meta_get_resource_definition(path->object_id, path->resource_id, &resdef)) {
+        return;
+    }
 
     current_path.path_type = REGISTRY_PATH_OBJECT;
 
@@ -1089,6 +1120,13 @@ void notifier_set_dirty(registry_t *registry, const registry_path_t *path)
 
         parameters.dirty = true;
         parameters.sent = false;
+
+        // The content-type needs to be set explicitly only for OPAQUE.
+        if (resdef->type == LWM2M_RESOURCE_TYPE_OPAQUE) {
+            parameters.available.content_type = 1;
+            parameters.content_type = COAP_CONTENT_OMA_OPAQUE_TYPE;
+        }
+
         registry_set_observation_parameters(registry, &current_path, &parameters);
 
     } while (current_path.path_type++ != path->path_type);

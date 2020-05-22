@@ -161,8 +161,10 @@ void send_queue_send_next(struct endpoint_s *endpoint)
             break;
 
         case SEND_QUEUE_COAP_PING:
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
             tr_debug("send_queue_send_next() CoAP Ping");
             endpoint_send_coap_ping(endpoint);
+#endif
             break;
 
         case SEND_QUEUE_NONE:

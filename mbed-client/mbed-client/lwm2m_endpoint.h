@@ -111,15 +111,19 @@ typedef struct endpoint_s {
     timeout_t *coap_timeout; ///< Timer, used for running the CoAP protocol module.
     uint32_t coap_time; ///< Counter counting seconds, used for timing the CoAP protocol module.
     uint32_t message_token; ///< Used for storing the token of the last sent endpoint message.
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
     uint32_t next_coap_ping_send_time; ///< In seconds, new time is calculated after packet sending.
     uint16_t coap_ping_id; ///< Message ID of the last CoAP ping.
+#endif
     int8_t event_handler_id; ///< ID of the event handler for the endpoint events.
     unsigned message_type:3; ///< Type of the currently processed message.
     unsigned last_message_type:3; ///< Type of the last endpoint message sent.
     oma_lwm2m_binding_and_mode_t mode:4; ///< Binding mode.
     bool free_parameters:1; ///< If != 0, `name`, `type` and `domain` will be passed to `lwm2m_free` when `endpoint_destroy` is called.
     bool registered:1; ///< Flag used for checking if the endpoint is currently registered to the server.
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
     bool coap_ping_request:1; ///< CoAP ping request is pending.
+#endif
 
 } endpoint_t;
 
@@ -367,7 +371,9 @@ void endpoint_stop_coap_exec_timer(endpoint_t *endpoint);
  */
 void endpoint_start_coap_exec_timer(endpoint_t *endpoint);
 
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
 void endpoint_send_coap_ping(endpoint_t *endpoint);
+#endif
 
 #ifdef __cplusplus
 }

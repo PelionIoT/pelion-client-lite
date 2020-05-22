@@ -36,6 +36,7 @@ static void _protoman_state_change(struct protoman_s *protoman, int new_state);
 static struct protoman_event_storage_unit_s *protoman_event_storage_alloc(struct protoman_event_storage_s *event_storage, uint8_t event_type, uint32_t scheduled_at);
 static void protoman_event_processed(struct protoman_event_storage_s *protoman_event_storage, arm_event_s *event);
 static void protoman_events_cancel(struct protoman_event_storage_s *event_storage);
+static int _protoman_drive_layers_to_state(struct protoman_s *protoman, int target_state);
 
 
 void *protoman_internal_calloc(size_t nmemb, size_t size)
@@ -54,7 +55,7 @@ int protoman_read(struct protoman_s *protoman, struct protoman_io_header_s *oper
 {
     struct protoman_layer_s *layer;
 
-    if (PROTOMAN_STATE_CONNECTED == protoman->current_state) {
+    if ((PROTOMAN_STATE_CONNECTED == protoman->current_state) || (PROTOMAN_STATE_RESUMED == protoman->current_state)) {
         layer = ns_list_get_first(&protoman->layers);
         protoman_info("reading from %s layer", layer->name);
         return layer->callbacks->layer_read(layer, operation);
@@ -68,7 +69,8 @@ int protoman_write(struct protoman_s *protoman, struct protoman_io_header_s *ope
 {
     struct protoman_layer_s *layer;
 
-    if (PROTOMAN_STATE_CONNECTED == protoman->current_state) {
+    if ((PROTOMAN_STATE_CONNECTED == protoman->current_state) || (PROTOMAN_STATE_RESUMED == protoman->current_state))
+    {
         layer = ns_list_get_first(&protoman->layers);
         protoman_info("writing to %s layer", layer->name);
         return layer->callbacks->layer_write(layer, operation);
@@ -134,6 +136,20 @@ void protoman_disconnect(struct protoman_s *protoman)
     protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
 }
 
+void protoman_pause(struct protoman_s *protoman)
+{
+    protoman_info("");
+    protoman->target_state = PROTOMAN_STATE_PAUSED;
+    protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
+}
+
+void protoman_resume(struct protoman_s *protoman)
+{
+    protoman_info("");
+    protoman->target_state = PROTOMAN_STATE_RESUMED;
+    protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
+}
+
 static void _protoman_state_change(struct protoman_s *protoman, int new_state)
 {
     int old_state = protoman->current_state;
@@ -156,22 +172,46 @@ static void _protoman_state_change(struct protoman_s *protoman, int new_state)
     protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
 
     switch (new_state) {
+        case PROTOMAN_STATE_INITIALIZED:
+            protoman_info("initialized");
+            protoman->event_cb(protoman, NULL, PROTOMAN_EVENT_INITIALIZED, protoman->event_ctx);
+            break;
         case PROTOMAN_STATE_CONNECTING:
             protoman_info("connecting");
             break;
         case PROTOMAN_STATE_CONNECTED:
+            protoman_info("connected");
             protoman->event_cb(protoman, NULL, PROTOMAN_EVENT_CONNECTED, protoman->event_ctx);
             break;
         case PROTOMAN_STATE_DISCONNECTING:
             protoman_info("disconnecting");
             break;
         case PROTOMAN_STATE_DISCONNECTED:
+            protoman_info("disconnected");
             protoman->event_cb(protoman, NULL, PROTOMAN_EVENT_DISCONNECTED, protoman->event_ctx);
             break;
+        case PROTOMAN_STATE_PAUSING:
+            protoman_info("pausing");
+            break;
+        case PROTOMAN_STATE_PAUSED:
+            protoman_info("paused");
+            protoman->event_cb(protoman, NULL, PROTOMAN_EVENT_PAUSED, protoman->event_ctx);
+            break;
+        case PROTOMAN_STATE_RESUMING:
+            protoman_info("resuming");
+            break;
+        case PROTOMAN_STATE_RESUMED:
+            protoman_info("resumed");
+            protoman->event_cb(protoman, NULL, PROTOMAN_EVENT_RESUMED, protoman->event_ctx);
+            break;
         case PROTOMAN_STATE_ERRORED:
+            protoman_err("errored");
             protoman->event_cb(protoman, protoman->first_error, PROTOMAN_EVENT_ERROR, protoman->event_ctx);
             break;
+        case PROTOMAN_STATE_ERRORING:
+            // The erroring state is just a transient state, which can be left to default handler (at cost of a warning trace)
         default:
+            protoman_info("unhandled state: %d", new_state);
             protoman->event_cb(protoman, NULL, PROTOMAN_APPEVENT_STATE_CHANGE, protoman->event_ctx);
             break;
     }
@@ -255,7 +295,8 @@ void *protoman_get_config(struct protoman_s *protoman, protoman_layer_id_t layer
     }
 }
 
-static int _do_disconnect(struct protoman_s *protoman)
+// helper for going through layers and driving them to the target state
+static int _protoman_drive_layers_to_state(struct protoman_s *protoman, int target_state)
 {
     protoman_verbose("");
 
@@ -266,22 +307,30 @@ static int _do_disconnect(struct protoman_s *protoman)
             continue;
         }
 
-        /* Already disconnected, continue to next */
-        if (PROTOMAN_STATE_DISCONNECTED == layer->perceived_state) {
+        /* Already in target state, continue to next */
+        if (target_state == layer->perceived_state) {
             continue;
         }
 
-        /* Start disconnecting */
-        layer->target_state = PROTOMAN_STATE_DISCONNECTED;
+        /* Start state transition */
+        layer->target_state = target_state;
         protoman_event(protoman, layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
         break;
     }
 
     /* If all layers have freed their context, free layers */
-    if (_layers_in_state(protoman, PROTOMAN_STATE_DISCONNECTED)) {
+    if (_layers_in_state(protoman, target_state)) {
         return PROTOMAN_STATE_RETVAL_FINISHED;
     }
     return PROTOMAN_STATE_RETVAL_WAIT;
+}
+
+
+static int _do_disconnect(struct protoman_s *protoman)
+{
+    protoman_verbose("");
+
+    return _protoman_drive_layers_to_state(protoman, PROTOMAN_STATE_DISCONNECTED);
 }
 
 static int _do_connect(struct protoman_s *protoman)
@@ -304,6 +353,19 @@ static int _do_connect(struct protoman_s *protoman)
     return PROTOMAN_STATE_RETVAL_WAIT;
 }
 
+static int _do_pause(struct protoman_s *protoman)
+{
+    protoman_verbose("");
+
+    return _protoman_drive_layers_to_state(protoman, PROTOMAN_STATE_PAUSED);
+}
+
+static int _do_resume(struct protoman_s *protoman)
+{
+    protoman_verbose("");
+
+    return _protoman_drive_layers_to_state(protoman, PROTOMAN_STATE_RESUMED);
+}
 
 void protoman_run(struct protoman_s *protoman)
 {
@@ -319,7 +381,7 @@ void protoman_run(struct protoman_s *protoman)
                 _protoman_state_change(protoman, PROTOMAN_STATE_INITIALIZED);
                 break;
             }
-            /* Create even for initiliazation. */
+            /* Create even for initialization. */
             protoman_event(protoman, last_layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
             break;
 
@@ -331,11 +393,17 @@ void protoman_run(struct protoman_s *protoman)
             }
             break;
 
+        case PROTOMAN_STATE_RESUMED:
+            // fall trough for now
         case PROTOMAN_STATE_CONNECTED:
             /* User initiated disconnection */
             switch (protoman->target_state) {
                 case PROTOMAN_STATE_DISCONNECTED:
                     _protoman_state_change(protoman, PROTOMAN_STATE_DISCONNECTING);
+                    break;
+                case PROTOMAN_STATE_PAUSED:
+                    _protoman_state_change(protoman, PROTOMAN_STATE_PAUSING);
+                    break;
             }
             break;
 
@@ -347,16 +415,30 @@ void protoman_run(struct protoman_s *protoman)
             }
             break;
 
+        case PROTOMAN_STATE_PAUSED:
+            // fall trough for now
+
         case PROTOMAN_STATE_INITIALIZED:
         case PROTOMAN_STATE_DISCONNECTED:
             switch (protoman->target_state) {
                 case PROTOMAN_STATE_CONNECTED:
                     /* Don't start (re)connecting until all layers are disconnected or initialized */
                     if (!(_layers_in_state(protoman, PROTOMAN_STATE_DISCONNECTED) ||
-                        _layers_in_state(protoman, PROTOMAN_STATE_INITIALIZED))) {
+                            _layers_in_state(protoman, PROTOMAN_STATE_INITIALIZED) ||
+                            _layers_in_state(protoman, PROTOMAN_STATE_PAUSED))) {
                         break;
                     }
                     _protoman_state_change(protoman, PROTOMAN_STATE_CONNECTING);
+                    break;
+
+                case PROTOMAN_STATE_RESUMED:
+                    /* Don't start (re)connecting until all layers are disconnected or initialized */
+                    if (!(_layers_in_state(protoman, PROTOMAN_STATE_DISCONNECTED) ||
+                            _layers_in_state(protoman, PROTOMAN_STATE_INITIALIZED) ||
+                            _layers_in_state(protoman, PROTOMAN_STATE_PAUSED))) {
+                        break;
+                    }
+                    _protoman_state_change(protoman, PROTOMAN_STATE_RESUMING);
                     break;
             }
             break;
@@ -368,8 +450,26 @@ void protoman_run(struct protoman_s *protoman)
         case PROTOMAN_STATE_ERRORED:
             break;
 
+        case PROTOMAN_STATE_PAUSING:
+            switch (_do_pause(protoman)) {
+                case PROTOMAN_STATE_RETVAL_FINISHED:
+                    _protoman_state_change(protoman, PROTOMAN_STATE_PAUSED);
+                    break;
+            }
+            break;
+
+        case PROTOMAN_STATE_RESUMING:
+            switch (_do_resume(protoman)) {
+                case PROTOMAN_STATE_RETVAL_FINISHED:
+                    // XXX: or should we actually skip to CONNECTED
+                    _protoman_state_change(protoman, PROTOMAN_STATE_RESUMED);
+                    break;
+            }
+            break;
+
         default:
             protoman_err("unknown default state %s", protoman_strstate(protoman->current_state));
+            assert(false);
             _protoman_state_change(protoman, PROTOMAN_STATE_ERRORING);
             break;
     }
@@ -394,9 +494,16 @@ void protoman_event(struct protoman_s *protoman,
     /* determine event storage unit */
     struct protoman_event_storage_unit_s *protoman_event_storage_unit;
 
+    // Following code can be ran only from one thread at a time, as the protoman_event_storage_alloc()
+    // can return a uninitialized event to multiple simultaneous callers. The race condition will
+    // happen also if eventOS_event_timer_request_at() is called for a time in the past, which
+    // will then trigger a event delivery immediately.
+    platform_enter_critical();
+
     protoman_event_storage_unit = protoman_event_storage_alloc(protoman_event_storage, event_type, ticks_at_new_scheduled);
 
     if (!protoman_event_storage_unit) {
+        platform_exit_critical();
         return;
     }
 
@@ -435,15 +542,9 @@ void protoman_event(struct protoman_s *protoman,
     }
 #endif
 
-    //We must call platform_enter_critical because there are cases that ticks_at_new_scheduled is already
-    //in past and as documentation for eventOS_event_timer_request_at tells the event will be triggered immediately.
-    //This causes that protoman_event_processed() will be called without protoman_event_storage_unit->arm_event_storage
-    //being set and then there will be an event in list which is already triggered and does nothing except
-    //prevents new events having same event_type for being created.
-    //This will cause system to stall until it is being resetted from above layers.
-    platform_enter_critical();
     arm_event_storage_t *scheduled_event = eventOS_event_timer_request_at(&event, ticks_at_new_scheduled);
     if (NULL == scheduled_event) {
+        platform_exit_critical();
         protoman_err("failed to schedule event, might result to event exhaustion");
         return;
     }
@@ -618,6 +719,14 @@ void protoman_event_handler(arm_event_s *event)
             layer->perceived_state = PROTOMAN_STATE_DISCONNECTED;
             _protoman_state_change(protoman, PROTOMAN_STATE_DISCONNECTING);
             break;
+        case PROTOMAN_EVENT_PAUSED:
+            layer->perceived_state = PROTOMAN_STATE_PAUSED;
+            protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
+            break;
+        case PROTOMAN_EVENT_RESUMED:
+            layer->perceived_state = PROTOMAN_STATE_RESUMED;
+            protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
+            break;
         case PROTOMAN_EVENT_ERROR:
             if (NULL == protoman->first_error) {
                 protoman->first_error = layer;
@@ -640,6 +749,8 @@ void protoman_event_handler(arm_event_s *event)
         switch (event->event_type) {
             case PROTOMAN_EVENT_CONNECTED:
             case PROTOMAN_EVENT_DISCONNECTED:
+            case PROTOMAN_EVENT_PAUSED:
+            case PROTOMAN_EVENT_RESUMED:
             case PROTOMAN_EVENT_ERROR:
                 /* Progress ProtocolManager state through protoman_run() */
                 protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);

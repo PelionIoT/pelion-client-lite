@@ -203,4 +203,4 @@ void registry_dynamic_list_remove_resource(const uint16_t object_id, const uint1
         }
     }
 }
-#endif
+#endif //MBED_CLIENT_ENABLE_DYNAMIC_CREATION

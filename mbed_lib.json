@@ -1,6 +1,6 @@
 {
     "name": "mbed-cloud-client",
- "config": {
+    "config": {
         "use-insecure-rot": null,
         "storage-type": {
             "help": "Select the storage type. KVSTORE is default choice. RAM is volatile storage and will not persist through reset, use it only for quick prototyping with developer certificates. EXTERNAL for other implementations.",
@@ -21,6 +21,12 @@
             "help": "Storage option for update image. Common values: ARM_UCP_FLASHIAP and ARM_UCP_FLASHIAP_BLOCKDEVICE.",
             "macro_name": "MBED_CLOUD_CLIENT_UPDATE_STORAGE",
             "accepted_values": ["ARM_UCP_FLASHIAP", "ARM_UCP_FLASHIAP_BLOCKDEVICE"],
+            "value": null
+        },
+        "use-soft-pause-resume": {
+            "help": "Option to enable fast connection resume after pause. This has tight dependencies on mbedtls configuration, platform implementation and application behavior.",
+            "macro_name": "MBED_CONF_CLOUD_CLIENT_USE_SOFT_PAUSE_RESUME",
+            "accepted_values": [true, null],
             "value": null
         }
     },

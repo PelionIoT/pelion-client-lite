@@ -22,7 +22,7 @@
 
 #define TRACE_GROUP "pdmc"
 
-void mbed_client_default_reboot()
+void mbed_client_default_reboot(void)
 {
     tr_info("Rebooting\n");
     system_reset();

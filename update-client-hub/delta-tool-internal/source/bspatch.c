@@ -81,30 +81,30 @@
 #define BS_PATCH_HEADERLEN 8
 
 // internal helper functions for BS Patching
-int bspatch_readInitialHeaderAndContinue(bspatch_stream* stream);
+int bspatch_readInitialHeaderAndContinue(struct bspatch_stream *stream);
 
-int bspatch_allocWorkingBuffers(bspatch_stream* stream);
+int bspatch_allocWorkingBuffers(struct bspatch_stream *stream);
 
-int read_controldata(bspatch_stream* stream);
-int read_controldata_header(struct bspatch_stream* stream);
-int read_controldata_process(struct bspatch_stream* stream);
-int sendPatchReadRequest(const bspatch_stream* stream, void* buffer, uint64_t length);
-int bspatch_readInitialHeaderAndContinueReadOfPatchDone(bspatch_stream* stream);
-int read_deCompressBuffer_process(struct bspatch_stream* stream, int64_t frame_len);
+//int read_controldata(struct bspatch_stream* stream);
+//int read_controldata_header(struct bspatch_stream* stream);
+int read_controldata_process(struct bspatch_stream *stream);
+int sendPatchReadRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length);
+int bspatch_readInitialHeaderAndContinueReadOfPatchDone(struct bspatch_stream *stream);
+int read_deCompressBuffer_process(struct bspatch_stream *stream, int64_t frame_len);
 //void process_read_frame_len(struct bspatch_stream* stream);
-int bspatch_processSingeExtraStrLenCompress(struct bspatch_stream* stream);
-int setExpectedExternalEventByState(struct bspatch_stream* stream, int status, bs_patch_state_t nextState,
-        bs_patch_api_event_t expectedExternalEvent);
+int bspatch_processSingeExtraStrLenCompress(struct bspatch_stream *stream);
+int setExpectedExternalEventByState(struct bspatch_stream *stream, int status, bs_patch_state_t nextState,
+                                    bs_patch_api_event_t expectedExternalEvent);
 
 // api to hide direct function pointer usage, return code will indicate either async completion synch completion or error
-int sendWriteNewRequest(const struct bspatch_stream* stream, void* buffer, uint64_t length);
-int sendSeekOldRequest(const struct bspatch_stream* stream, int64_t seek_diff);
-int sendReadOldRequest(const struct bspatch_stream* stream, void* buffer, uint64_t length);
-int bspatch_processDiffBytesPost(struct bspatch_stream* stream);
+int sendWriteNewRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length);
+int sendSeekOldRequest(const struct bspatch_stream *stream, int64_t seek_diff);
+int sendReadOldRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length);
+int bspatch_processDiffBytesPost(struct bspatch_stream *stream);
 
-int isPatchingDone(bspatch_stream* stream);
+int isPatchingDone(bspatch_stream *stream);
 uint64_t allignTo8ByteBoundary(uint64_t address);
-int readVarIntEventified(struct bspatch_stream* stream, int isSigned);
+int readVarIntEventified(struct bspatch_stream *stream, int isSigned);
 
 #if PATCH_STAT_COUNTING
 // note stats counting is now partly broken as varint are not calcualted correctly to header stats
@@ -139,13 +139,14 @@ static BsPatchStatistics bsStats = {0};
 #include <stdio.h>
 #define LOG_STATS printf
 void printStats();
-void printStats() {
+void printStats()
+{
     /*
      uint initial_header_bytes;
      */
     LOG_STATS("* ********** BS STATS START ***********\n");
     LOG_STATS("* max_compressedDataBuffer: %u max_deCompressBuffer: %u B\n", bsStats.max_compressedDataBuffer, bsStats.max_deCompressBuffer);
-    LOG_STATS("* initial_header_bytes %u\n", bsStats.initial_header_bytes );
+    LOG_STATS("* initial_header_bytes %u\n", bsStats.initial_header_bytes);
     LOG_STATS("* ctrlHeader_count %u bytes %u B\n", bsStats.control_header_count, bsStats.control_header_bytes);
     LOG_STATS("* frame_header_count %u frame_header_bytes %u B\n", bsStats.frame_header_count, bsStats.frame_header_bytes);
 
@@ -154,12 +155,12 @@ void printStats() {
     LOG_STATS("* total_diff_str_len_x %u B\n", bsStats.total_diff_str_len_x);
     LOG_STATS("* total_extra_str_len_y %u B\n", bsStats.total_extra_str_len_y);
 
-    uint totalUnCompPayloadBytes = bsStats.total_diff_str_len_x+bsStats.total_extra_str_len_y;
-    uint compressionEfficiency =(bsStats.compressed_frame_bytes*100)/totalUnCompPayloadBytes;
+    uint totalUnCompPayloadBytes = bsStats.total_diff_str_len_x + bsStats.total_extra_str_len_y;
+    uint compressionEfficiency = (bsStats.compressed_frame_bytes * 100) / totalUnCompPayloadBytes;
     LOG_STATS("* compressionEfficiency %u %% (smaller is better)\n", compressionEfficiency);
 
-    uint headerBytesSum = bsStats.initial_header_bytes+bsStats.control_header_bytes+bsStats.frame_header_bytes;
-    uint headerRatioToCompressedPayload = (headerBytesSum*100)/bsStats.compressed_frame_bytes;
+    uint headerBytesSum = bsStats.initial_header_bytes + bsStats.control_header_bytes + bsStats.frame_header_bytes;
+    uint headerRatioToCompressedPayload = (headerBytesSum * 100) / bsStats.compressed_frame_bytes;
     LOG_STATS("* headerRatioToCompressedPayload %u %%\n", headerRatioToCompressedPayload);
 
     LOG_STATS("* ********** BS STATS END ***********\n");
@@ -168,7 +169,7 @@ void printStats() {
 
 #endif
 
-static int64_t offtin(uint8_t* buf)
+static int64_t offtin(uint8_t *buf)
 {
     int64_t y;
 
@@ -188,8 +189,9 @@ static int64_t offtin(uint8_t* buf)
     y = y * 256;
     y += buf[0];
 
-    if (buf[7] & 0x80)
+    if (buf[7] & 0x80) {
         y = -y;
+    }
 
     return y;
 }
@@ -204,15 +206,16 @@ static int64_t offtin(uint8_t* buf)
  * @param plain_done the amount of bytes that was dedeCompressBuffer from frame
  * @return 0 if succesfull, BSPATCH error code if failure.
  */
-static int read_deCompressBuffer(struct bspatch_stream* stream, int64_t frame_len)
+static int read_deCompressBuffer(struct bspatch_stream *stream, int64_t frame_len)
 {
-    if (frame_len > stream->max_deCompressBuffer)
+    if (frame_len > stream->max_deCompressBuffer) {
         return EBSAPI_ERR_CORRUPTED_PATCH;
+    }
 
 #if PATCH_STAT_COUNTING
 
-    bsStats.compressed_frame_count+=1;
-    bsStats.compressed_frame_bytes+=frame_len;
+    bsStats.compressed_frame_count += 1;
+    bsStats.compressed_frame_bytes += frame_len;
 #endif
 
     return sendPatchReadRequest(stream, stream->bufferForCompressedData, frame_len);
@@ -235,15 +238,15 @@ static int read_deCompressBuffer(struct bspatch_stream* stream, int64_t frame_le
  }
  */
 
-int read_deCompressBuffer_process(struct bspatch_stream* stream, int64_t frame_len)
+int read_deCompressBuffer_process(struct bspatch_stream *stream, int64_t frame_len)
 {
-    stream->undeCompressBuffer_len = LZ4_decompress_safe((char*) stream->bufferForCompressedData,
-            (char*) stream->nonCompressedDataBuffer, frame_len, stream->max_compressedDataBuffer);
+    stream->undeCompressBuffer_len = LZ4_decompress_safe((char *) stream->bufferForCompressedData,
+                                                         (char *) stream->nonCompressedDataBuffer, frame_len, stream->max_compressedDataBuffer);
 
     return stream->undeCompressBuffer_len > 0 ? 0 : EBSAPI_ERR_CORRUPTED_PATCH;
 }
 
-int read_controldata_process(struct bspatch_stream* stream)
+int read_controldata_process(struct bspatch_stream *stream)
 {
 #if (BS_HIGH_LEVEL_DEBUG)
     int32_t headerDataSize = stream->nonCompressedDataBuffer[0];
@@ -255,8 +258,8 @@ int read_controldata_process(struct bspatch_stream* stream)
         stream->ctrl[EXTRA_STR_LEN_Y] = offtin(stream->bufferForCompressedData + 8);
         stream->ctrl[OLD_FILE_CTRL_OFF_SET_JUMP] = offtin(stream->bufferForCompressedData + 16);
     } else {
-        if (LZ4_decompress_safe((char*) stream->bufferForCompressedData, (char*) stream->nonCompressedDataBuffer,
-                stream->nonCompressedDataBuffer[0], 24) != 24) {
+        if (LZ4_decompress_safe((char *) stream->bufferForCompressedData, (char *) stream->nonCompressedDataBuffer,
+                                stream->nonCompressedDataBuffer[0], 24) != 24) {
             return EBSAPI_ERR_CORRUPTED_PATCH;
         }
 
@@ -267,14 +270,14 @@ int read_controldata_process(struct bspatch_stream* stream)
 
 #if (BS_HIGH_LEVEL_DEBUG)
     printf("read_controldata_process DIFF_STR_LEN_X %" PRId64 " EXTRA_STR_LEN_Y %" PRId64 " OLD_FILE_CTRL_OFF_SET_JUMP %"PRId64" (headerdatasize: %u)\n",
-            stream->ctrl[DIFF_STR_LEN_X],
-            stream->ctrl[EXTRA_STR_LEN_Y],
-            stream->ctrl[OLD_FILE_CTRL_OFF_SET_JUMP], headerDataSize);
+           stream->ctrl[DIFF_STR_LEN_X],
+           stream->ctrl[EXTRA_STR_LEN_Y],
+           stream->ctrl[OLD_FILE_CTRL_OFF_SET_JUMP], headerDataSize);
 #endif
 
 #if PATCH_STAT_COUNTING
-    bsStats.total_diff_str_len_x+=stream->ctrl[DIFF_STR_LEN_X];
-    bsStats.total_extra_str_len_y+=stream->ctrl[EXTRA_STR_LEN_Y];
+    bsStats.total_diff_str_len_x += stream->ctrl[DIFF_STR_LEN_X];
+    bsStats.total_extra_str_len_y += stream->ctrl[EXTRA_STR_LEN_Y];
 #endif
 
     return 0;
@@ -288,7 +291,7 @@ uint64_t allignTo8ByteBoundary(uint64_t address)
     return address;
 }
 
-int bspatch_allocWorkingBuffers(struct bspatch_stream* stream)
+int bspatch_allocWorkingBuffers(struct bspatch_stream *stream)
 {
     int result = 0;
 
@@ -296,7 +299,7 @@ int bspatch_allocWorkingBuffers(struct bspatch_stream* stream)
         return EBSAPI_ERR_PARAMETERS;
     }
     log("bspatch_allocWorkingBuffers max_compressedDataBuffer %u max_deCompressBuffer %u\n",
-            stream->max_compressedDataBuffer, stream->max_deCompressBuffer );
+        stream->max_compressedDataBuffer, stream->max_deCompressBuffer);
 
 #if PATCH_STAT_COUNTING
     bsStats.max_compressedDataBuffer = stream->max_compressedDataBuffer;
@@ -308,24 +311,25 @@ int bspatch_allocWorkingBuffers(struct bspatch_stream* stream)
         log("BS_PATCH_COMPILE_TIME_MEMORY_ALLOC %u < (%u + %u)\n", BS_PATCH_COMPILE_TIME_MEMORY_ALLOC, stream->max_compressedDataBuffer, stream->max_deCompressBuffer);
         return EBSAPI_ERR_OUT_OF_MEMORY;
     }
-    stream->nonCompressedDataBuffer = (uint8_t*) allignTo8ByteBoundary((uint64_t) & (stream->bsMemoryBuffer)); // this should already be alligned
+    stream->nonCompressedDataBuffer = (uint8_t *) allignTo8ByteBoundary((uint64_t) & (stream->bsMemoryBuffer)); // this should already be alligned
 
-    uint32_t diff1 = (uint64_t)stream->nonCompressedDataBuffer-(uint64_t)stream->bsMemoryBuffer;
+    uint32_t diff1 = (uint64_t)stream->nonCompressedDataBuffer - (uint64_t)stream->bsMemoryBuffer;
+    (void)diff1;  /* avoid unused warning when log is disabled */
+    stream->bufferForCompressedData = ((uint8_t *) & (stream->bsMemoryBuffer)) + stream->max_compressedDataBuffer;
 
-    stream->bufferForCompressedData = ((uint8_t*) &(stream->bsMemoryBuffer)) + stream->max_compressedDataBuffer;
 
+    uint8_t *allignedAdress = (uint8_t *) allignTo8ByteBoundary((uint64_t) stream->bufferForCompressedData);
 
-    uint8_t* allignedAdress = (uint8_t*) allignTo8ByteBoundary((uint64_t) stream->bufferForCompressedData);
-
-    uint32_t diff2 = (uint64_t)allignedAdress-(uint64_t)stream->bufferForCompressedData;
+    uint32_t diff2 = (uint64_t)allignedAdress - (uint64_t)stream->bufferForCompressedData;
+    (void)diff2;  /* avoid unused warning when log is disabled */
     stream->bufferForCompressedData = allignedAdress;
     log("align extra1 %u align extra2 %u", diff1, diff2);
 
     if ((stream->bufferForCompressedData + stream->max_deCompressBuffer)
-            > ((uint8_t*) stream) + sizeof(bspatch_stream)) {
+            > ((uint8_t *) stream) + sizeof(bspatch_stream)) {
         log("not enough memory bufferComp %u decomp %u size %u stream %u allingmentbuffer u%\n",
-                stream->bufferForCompressedData, stream->max_deCompressBuffer,
-                sizeof(bspatch_stream), (uint32_t)stream, sizeof(stream->allignmentBuffer));
+            stream->bufferForCompressedData, stream->max_deCompressBuffer,
+            sizeof(bspatch_stream), (uint32_t)stream, sizeof(stream->allignmentBuffer));
         return EBSAPI_ERR_OUT_OF_MEMORY;
     }
     return result;
@@ -340,55 +344,57 @@ int bspatch_allocWorkingBuffers(struct bspatch_stream* stream)
 #endif // BS_PATCH_COMPILE_TIME_MEMORY_ALLOC
 }
 
-int bspatch_processDiffBytesPost(struct bspatch_stream* stream)
+int bspatch_processDiffBytesPost(struct bspatch_stream *stream)
 {
     /* Adjust pointers */
     stream->newpos += stream->ctrl[DIFF_STR_LEN_X];
     return 0;
 }
 
-int bspatch_processSingeExtraStrLenCompress(struct bspatch_stream* stream)
+int bspatch_processSingeExtraStrLenCompress(struct bspatch_stream *stream)
 {
     int result = 0;
 
     result = read_deCompressBuffer_process(stream, stream->frame_len);
 
-    if (result)
+    if (result) {
         return result;
+    }
 
     return sendWriteNewRequest(stream, stream->nonCompressedDataBuffer, stream->undeCompressBuffer_len);
 }
 
 // onle there helpers should access function pointers in BS API
-int sendPatchReadRequest(const bspatch_stream* stream, void* buffer, uint64_t length)
+int sendPatchReadRequest(const bspatch_stream *stream, void *buffer, uint64_t length)
 {
     return stream->read_patch(stream, buffer, length);
 }
 
-int sendSeekOldRequest(const struct bspatch_stream* stream, int64_t seek_diff)
+int sendSeekOldRequest(const struct bspatch_stream *stream, int64_t seek_diff)
 {
     return stream->seek_old(stream, seek_diff);
 }
 
-int sendReadOldRequest(const struct bspatch_stream* stream, void* buffer, uint64_t length)
+int sendReadOldRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length)
 {
     return stream->read_old(stream, buffer, length);
 }
 
-int sendWriteNewRequest(const struct bspatch_stream* stream, void* buffer, uint64_t length)
+int sendWriteNewRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length)
 {
     return stream->write_new(stream, buffer, length);
 }
 
-int bspatch_readInitialHeaderAndContinue(bspatch_stream* stream)
+int bspatch_readInitialHeaderAndContinue(bspatch_stream *stream)
 {
-    if (stream->read_old == 0 || stream->read_patch == 0 || stream->seek_old == 0 || stream->write_new == 0)
+    if (stream->read_old == 0 || stream->read_patch == 0 || stream->seek_old == 0 || stream->write_new == 0) {
         return EBSAPI_ERR_PARAMETERS;
+    }
 
     if (stream->new_size == 0) {
         /* First call, read header */
 #if PATCH_STAT_COUNTING
-        bsStats.initial_header_bytes+=FILE_HEADER_LEN;
+        bsStats.initial_header_bytes += FILE_HEADER_LEN;
 #endif
 
         return sendPatchReadRequest(stream, stream->header, FILE_HEADER_LEN);
@@ -397,7 +403,7 @@ int bspatch_readInitialHeaderAndContinue(bspatch_stream* stream)
     }
 }
 
-int bspatch_readInitialHeaderAndContinueReadOfPatchDone(bspatch_stream* stream)
+int bspatch_readInitialHeaderAndContinueReadOfPatchDone(bspatch_stream *stream)
 {
     /* Check for appropriate magic */
     if (memcmp(stream->header, FILE_MAGIC, FILE_MAGIC_LEN) != 0) {
@@ -434,8 +440,8 @@ int bspatch_readInitialHeaderAndContinueReadOfPatchDone(bspatch_stream* stream)
     return 0;
 }
 
-int setExpectedExternalEventByState(struct bspatch_stream* stream, int status, bs_patch_state_t nextState,
-        bs_patch_api_event_t expectedExternalEvent)
+int setExpectedExternalEventByState(struct bspatch_stream *stream, int status, bs_patch_state_t nextState,
+                                    bs_patch_api_event_t expectedExternalEvent)
 {
     if (status < 0) {
         return 1;
@@ -460,17 +466,18 @@ int setExpectedExternalEventByState(struct bspatch_stream* stream, int status, b
     return 1;
 }
 
-int isPatchingDone(bspatch_stream* stream)
+int isPatchingDone(bspatch_stream *stream)
 {
-    if (stream->new_size != 0 && stream->newpos >= stream->new_size)
+    if (stream->new_size != 0 && stream->newpos >= stream->new_size) {
         return 1;
-    else
+    } else {
         return 0;
+    }
 }
 
 /// API FUNCTIONS VISIBLE TO OUTSIDE INTERFACE
-void ARM_BS_Init(bspatch_stream* stream, void* opaque, read_patch_f rpf, read_old_f rof, seek_old_f sof,
-        write_new_f wnf)
+void ARM_BS_Init(bspatch_stream *stream, void *opaque, read_patch_f rpf, read_old_f rof, seek_old_f sof,
+                 write_new_f wnf)
 {
     assert(stream && rpf && rof && sof && wnf);
     memset(stream, 0, sizeof(struct bspatch_stream));
@@ -508,7 +515,7 @@ if (setExpectedExternalEventByState(stream, status, next_state, EBSAPI_WRITE_NEW
 
 #define SET_NEXT_STATE(new_state) if(status!=0){log ("invalid status %d\n", status);}assert("error status in setting next state" && status==0); SET_NEXT_STATE_NOCHECK(new_state);
 
-bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream* stream, bs_patch_api_event_t bsApiEvent)
+bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream *stream, bs_patch_api_event_t bsApiEvent)
 {
     if (bsApiEvent != stream->expectedExternalEvent) {
         return EBSAPI_ERR_UNEXPECTED_EVENT;
@@ -637,7 +644,7 @@ bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream* stream, bs_p
 
                 for (uint32_t i = 0; i < stream->readRequestSize; i++) {
                     uint8_t newByte = stream->bufferForCompressedData[i]
-                            + stream->nonCompressedDataBuffer[stream->i + i];
+                                      + stream->nonCompressedDataBuffer[stream->i + i];
                     stream->bufferForCompressedData[i] = newByte;
                 }
                 status = sendWriteNewRequest(stream, stream->bufferForCompressedData, stream->readRequestSize);
@@ -720,12 +727,12 @@ bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream* stream, bs_p
     }
 }
 
-int readVarIntEventified(struct bspatch_stream* stream, int isSigned)
+int readVarIntEventified(struct bspatch_stream *stream, int isSigned)
 {
     int status = 0;
     if (isSigned) {
-        status = decode_signed_varint(*(stream->nonCompressedDataBuffer), (int64_t*) &stream->var_int,
-                stream->var_int_len);
+        status = decode_signed_varint(*(stream->nonCompressedDataBuffer), (int64_t *) &stream->var_int,
+                                      stream->var_int_len);
     } else {
         status = decode_unsigned_varint(*(stream->nonCompressedDataBuffer), &stream->var_int, stream->var_int_len);
     }
@@ -747,12 +754,12 @@ int readVarIntEventified(struct bspatch_stream* stream, int isSigned)
     return status;
 }
 
-void* ARM_BS_GetOpaque(const struct bspatch_stream* stream)
+void *ARM_BS_GetOpaque(const struct bspatch_stream *stream)
 {
     return stream->opaque;
 }
 
-int ARM_BS_Free(struct bspatch_stream* stream)
+int ARM_BS_Free(struct bspatch_stream *stream)
 {
 #if defined( BS_PATCH_COMPILE_TIME_MEMORY_ALLOC) && (BS_PATCH_COMPILE_TIME_MEMORY_ALLOC > 0)
     // nothing to free really but we can lose the pointers at least
