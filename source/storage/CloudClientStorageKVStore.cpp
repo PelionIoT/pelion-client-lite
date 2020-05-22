@@ -21,6 +21,7 @@
 #endif
 
 #if MBED_CONF_MBED_CLOUD_CLIENT_STORAGE_TYPE == KVSTORE
+
 // Note: this macro is needed on armcc to get the the limit macros like UINT16_MAX
 #ifndef __STDC_LIMIT_MACROS
 #define __STDC_LIMIT_MACROS
@@ -53,26 +54,16 @@ using namespace mbed;
 #endif
 
 
-// Use same fields than FCC is using when injecting data to the kv store
-#define FCC_BOOTSTRAP_DEVICE_PRIVATE_KEY pelion_wPrvKey_mbed.BootstrapDevicePrivateKey
-#define FCC_BOOTSTRAP_SERVER_URI pelion_wCfgParam_mbed.BootstrapServerURI
-#define FCC_BOOTSTRAP_SERVER_ROOT_CA_CERTIFICATE pelion_wCrtae_mbed.BootstrapServerCACert
-#define FCC_BOOTSTRAP_DEVICE_CERTIFICATE pelion_wCrtae_mbed.BootstrapDeviceCert
-#define FCC_LWM2M_SERVER_URI pelion_wCfgParam_mbed.LwM2MServerURI
-#define FCC_ENDPOINT_NAME pelion_wCfgParam_mbed.EndpointName
-#define FCC_LWM2M_DEVICE_CERTIFICATE pelion_wCrtae_mbed.LwM2MDeviceCert
-#define FCC_LWM2M_SERVER_ROOT_CA_CERTIFICATE pelion_wCrtae_mbed.LwM2MServerCACert
-#define FCC_LWM2M_DEVICE_PRIVATE_KEY pelion_wPrvKey_mbed.LwM2MDevicePrivateKey
-#define FCC_UPDATE_CERTIFICATE pelion_wCrtae_mbed.UpdateAuthCert
-#define FCC_UPDATE_CLASS_ID pelion_wCfgParam_mbed.ClassId
-#define FCC_UPDATE_VENDOR_ID pelion_wCfgParam_mbed.VendorId
 
-#define KVSTORE_PATH(KEY_NAME) "/" XSTR(MBED_CONF_STORAGE_DEFAULT_KV) "/" XSTR(KEY_NAME)
+#define KVSTORE_PATH "/" XSTR(MBED_CONF_STORAGE_DEFAULT_KV) "/"
+
+// max supported key name len
+#define MAX_KEY_NAME_LEN 100
+
 
 #define TRACE_GROUP "mClt"
 
 static ccs_status_e map_kvstore_result(int result);
-static const char *get_kvstore_key(cloud_client_param key);
 
 ccs_status_e uninitialize_storage(void)
 {
@@ -106,11 +97,16 @@ ccs_status_e initialize_storage(void)
 ccs_status_e get_config_parameter(cloud_client_param key, uint8_t *buffer, const size_t buffer_size, size_t *value_length)
 {
     ccs_status_e status;
-    const char *key_name = get_kvstore_key(key);
+    char key_name[sizeof(KVSTORE_PATH) + MAX_KEY_NAME_LEN] = { KVSTORE_PATH };
+    if (strlen(key) > MAX_KEY_NAME_LEN) {
+        tr_error("CloudClientStorage::get_config_parameter(), key name %s longer then %d", key, MAX_KEY_NAME_LEN);
+        return CCS_STATUS_ERROR;
+    }
+    memcpy(key_name + strlen(KVSTORE_PATH), key, strlen(key));
     tr_debug("CloudClientStorage::get_config_parameter(), key name %s", key_name);
     int result = kv_get(key_name, (void *)buffer, buffer_size, value_length);
     status = map_kvstore_result(result);
-    tr_debug("CloudClientStorage::get_config_parameter(), ret: %d", status);
+    tr_debug("CloudClientStorage::get_config_parameter(), ret: %d, size: %lu", status, (unsigned long)*value_length);
 
     return status;
 }
@@ -118,13 +114,18 @@ ccs_status_e get_config_parameter(cloud_client_param key, uint8_t *buffer, const
 ccs_status_e set_config_parameter(cloud_client_param key, const uint8_t *buffer, const size_t buffer_size)
 {
     ccs_status_e status;
-    const char *key_name = get_kvstore_key(key);
+    char key_name[sizeof(KVSTORE_PATH) + MAX_KEY_NAME_LEN] = { KVSTORE_PATH };
+    if (strlen(key) > MAX_KEY_NAME_LEN) {
+        tr_error("CloudClientStorage::set_config_parameter(), key name %s longer then %d", key, MAX_KEY_NAME_LEN);
+        return CCS_STATUS_ERROR;
+    }
+    memcpy(key_name + strlen(KVSTORE_PATH), key, strlen(key));
     tr_debug("CloudClientStorage::set_config_parameter(), key name %s", key_name);
 
     int result = kv_set(key_name, (void *)buffer, buffer_size, 0);
 
     status = map_kvstore_result(result);
-    tr_debug("CloudClientStorage::set_config_parameter(), ret: %d", status);
+    tr_debug("CloudClientStorage::set_config_parameter(), ret: %d, size %lu", status, (unsigned long)buffer_size);
 
     return status;
 }
@@ -132,13 +133,18 @@ ccs_status_e set_config_parameter(cloud_client_param key, const uint8_t *buffer,
 ccs_status_e remove_config_parameter(cloud_client_param key)
 {
     ccs_status_e status;
-    const char *key_name = get_kvstore_key(key);
-    tr_debug("remove_config_parameter, key name %s", key_name);
+    char key_name[sizeof(KVSTORE_PATH) + MAX_KEY_NAME_LEN] = { KVSTORE_PATH };
+    if (strlen(key) > MAX_KEY_NAME_LEN) {
+        tr_error("CloudClientStorage::remove_config_parameter(), key name %s longer then %d", key, MAX_KEY_NAME_LEN);
+        return CCS_STATUS_ERROR;
+    }
+    memcpy(key_name + strlen(KVSTORE_PATH), key, strlen(key));
+    tr_debug("CloudClientStorage::remove_config_parameter(), key name %s", key_name);
 
     int result = kv_remove(key_name);
 
     status = map_kvstore_result(result);
-    tr_debug("remove_config_parameter, ret: %d", status);
+    tr_debug("CloudClientStorage::remove_config_parameter(), ret: %d", status);
 
     return status;
 }
@@ -146,7 +152,12 @@ ccs_status_e remove_config_parameter(cloud_client_param key)
 ccs_status_e size_config_parameter(cloud_client_param key, size_t *size_out)
 {
     ccs_status_e status;
-    const char *key_name = get_kvstore_key(key);
+    char key_name[sizeof(KVSTORE_PATH) + MAX_KEY_NAME_LEN] = { KVSTORE_PATH };
+    if (strlen(key) > MAX_KEY_NAME_LEN) {
+        tr_error("CloudClientStorage::size_config_parameter(), key name %s longer then %d", key, MAX_KEY_NAME_LEN);
+        return CCS_STATUS_ERROR;
+    }
+    memcpy(key_name + strlen(KVSTORE_PATH), key, strlen(key));
     tr_debug("CloudClientStorage::size_config_parameter(), key name %s", key_name);
     kv_info_t info;
     int result = kv_get_info(key_name, &info);
@@ -185,142 +196,6 @@ static ccs_status_e map_kvstore_result(int result)
             break;
     }
     return status;
-}
-
-static const char *get_kvstore_key(cloud_client_param key)
-{
-    const char *str;
-    switch (key) {
-        case BOOTSTRAP_SERVER_URI:
-            str = KVSTORE_PATH(FCC_BOOTSTRAP_SERVER_URI);
-            break;
-        case ROOT_OF_TRUST:
-            str = KVSTORE_PATH(ROOT_OF_TRUST);
-            break;
-        case LWM2M_SERVER_URI:
-            str = KVSTORE_PATH(FCC_LWM2M_SERVER_URI);
-            break;
-        case INTERNAL_ENDPOINT:
-            str = KVSTORE_PATH(INTERNAL_ENDPOINT);
-            break;
-        case ENDPOINT_NAME:
-            str = KVSTORE_PATH(FCC_ENDPOINT_NAME);
-            break;
-#if defined(PROTOMAN_SECURITY_ENABLE_PSK)
-        case BOOTSTRAP_SERVER_PSK_IDENTITY:
-            str = KVSTORE_PATH(BOOTSTRAP_SERVER_PSK_IDENTITY);
-            break;
-        case BOOTSTRAP_SERVER_PSK_SECRET:
-            str = KVSTORE_PATH(BOOTSTRAP_SERVER_PSK_SECRET);
-            break;
-        case LWM2M_SERVER_PSK_IDENTITY:
-            str = KVSTORE_PATH(LWM2M_SERVER_PSK_IDENTITY);
-            break;
-        case LWM2M_SERVER_PSK_SECRET:
-            str = KVSTORE_PATH(LWM2M_SERVER_PSK_SECRET);
-            break;
-#ifdef MBED_CLOUD_CLIENT_SUPPORT_UPDATE
-        case UPDATE_PSK_IDENTITY:
-            str = KVSTORE_PATH(UPDATE_PSK_IDENTITY);
-            break;
-        case UPDATE_PSK_SECRET:
-            str = KVSTORE_PATH(UPDATE_PSK_SECRET);
-            break;
-        case KEY_VENDOR_ID:
-            str = KVSTORE_PATH(KEY_VENDOR_ID);
-            break;
-        case KEY_CLASS_ID:
-            str = KVSTORE_PATH(KEY_CLASS_ID);
-            break;
-#endif
-#endif //defined(PROTOMAN_SECURITY_ENABLE_PSK)
-#if defined(PROTOMAN_SECURITY_ENABLE_CERTIFICATE)
-        case BOOTSTRAP_DEVICE_CERTIFICATE:
-            str = KVSTORE_PATH(FCC_BOOTSTRAP_DEVICE_CERTIFICATE);
-            break;
-        case BOOTSTRAP_SERVER_ROOT_CA_CERTIFICATE:
-            str = KVSTORE_PATH(FCC_BOOTSTRAP_SERVER_ROOT_CA_CERTIFICATE);
-            break;
-        case BOOTSTRAP_DEVICE_PRIVATE_KEY:
-            str = KVSTORE_PATH(FCC_BOOTSTRAP_DEVICE_PRIVATE_KEY);
-            break;
-        case LWM2M_DEVICE_CERTIFICATE:
-            str = KVSTORE_PATH(FCC_LWM2M_DEVICE_CERTIFICATE);
-            break;
-        case LWM2M_SERVER_ROOT_CA_CERTIFICATE:
-            str = KVSTORE_PATH(FCC_LWM2M_SERVER_ROOT_CA_CERTIFICATE);
-            break;
-        case LWM2M_DEVICE_PRIVATE_KEY:
-            str = KVSTORE_PATH(FCC_LWM2M_DEVICE_PRIVATE_KEY);
-            break;
-#ifdef MBED_CLOUD_CLIENT_SUPPORT_UPDATE
-        case UPDATE_VENDOR_ID:
-            str = KVSTORE_PATH(FCC_UPDATE_VENDOR_ID);
-            break;
-        case UPDATE_CLASS_ID:
-            str = KVSTORE_PATH(FCC_UPDATE_CLASS_ID);
-            break;
-        case UPDATE_FINGERPRINT:
-            str = KVSTORE_PATH(UPDATE_FINGERPRINT);
-            break;
-        case UPDATE_CERTIFICATE:
-            str = KVSTORE_PATH(FCC_UPDATE_CERTIFICATE);
-            break;
-#endif
-#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
-        case SSL_SESSION_DATA:
-            str = KVSTORE_PATH(SSL_SESSION_DATA);
-            break;
-#endif
-#endif //defined(PROTOMAN_SECURITY_ENABLE_CERTIFICATE)
-#ifdef USE_EXTERNAL_USER_STORAGE_PARAMETERS
-        case USER_STORAGE_FIELD_0:
-            str = KVSTORE_PATH(USER_STORAGE_FIELD_0);
-            break;
-        case USER_STORAGE_FIELD_1:
-            str = KVSTORE_PATH(USER_STORAGE_FIELD_1);
-            break;
-        case USER_STORAGE_FIELD_2:
-            str = KVSTORE_PATH(USER_STORAGE_FIELD_2);
-            break;
-        case USER_STORAGE_FIELD_3:
-            str = KVSTORE_PATH(USER_STORAGE_FIELD_3);
-            break;
-        case USER_STORAGE_FIELD_4:
-            str = KVSTORE_PATH(USER_STORAGE_FIELD_4);
-            break;
-        case USER_STORAGE_FIELD_5:
-            str = KVSTORE_PATH(USER_STORAGE_FIELD_5);
-            break;
-        case USER_STORAGE_FIELD_6:
-            str = KVSTORE_PATH(USER_STORAGE_FIELD_6);
-            break;
-        case USER_STORAGE_FIELD_7:
-            str = KVSTORE_PATH(USER_STORAGE_FIELD_7);
-            break;
-        case USER_STORAGE_FIELD_8:
-            str = KVSTORE_PATH(USER_STORAGE_FIELD_8);
-            break;
-#endif // USE_EXTERNAL_USER_STORAGE_PARAMETERS
-
-#ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
-        case FOTA_ENCRYPTE_KEY:
-            str = KVSTORE_PATH(FOTA_ENCRYPTE_KEY);
-            break;
-        case FOTA_SALT_KEY:
-            str = KVSTORE_PATH(FOTA_SALT_KEY);
-            break;
-        case FOTA_MANIFEST_KEY:
-            str = KVSTORE_PATH(FOTA_MANIFEST_KEY);
-            break;
-#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
-
-        default:
-            tr_error("CloudClientStorage::get_kvstore_key(), unknown key: %d", key);
-            assert(false);
-    }
-
-    return str;
 }
 
 #ifdef RESET_STORAGE

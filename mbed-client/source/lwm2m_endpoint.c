@@ -41,15 +41,17 @@
 
 #define TRACE_GROUP "lwEP"
 
-static const char MCC_VERSION[] = "mccv=1.0.0-lite";
+static const char MCC_VERSION[] = "mccv=1.1.0-lite";
 
 static const char ep_name_parameter[]  = "ep="; /* Endpoint name. A unique name for the registering node in a domain.  */
 static const uint8_t resource_path[] = {'r', 'd'}; /* For resource directory */
 #ifdef MBED_CONF_MBED_CLIENT_REGISTER_RESOURCE_NAME
 static const char resource_type_parameter[] = {'r', 't', '='}; /* Resource type. Only once for registration */
 #endif
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 static const uint8_t bs_uri[] = {'b', 's'};
 static const char bs_ep_name[] = "ep="; // same as normal ep-name?!
+#endif
 static const char ep_lifetime_parameter[] = "lt="; /* Lifetime. Number of seconds that this registration will be valid for. Must be updated within this time, or will be removed. */
 static const char et_parameter[] = "et="; /* Endpoint type */
 static const char bs_queue_mode[] = "b=";
@@ -93,9 +95,11 @@ static uint8_t *write_uri_query_options(uint8_t *temp_ptr, const endpoint_t *end
                                      bool update,
                                      const char *uri_query,
                                      int32_t *buffer_left);
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 static uint8_t *write_bs_uri_query_options(uint8_t *temp_ptr, const endpoint_t *endpoint,
                                      const char *uri_query,
                                      int32_t *buffer_left);
+#endif
 
 static int endpoint_build_registration_body(endpoint_t *endpoint, sn_coap_hdr_s *message_ptr, uint8_t updating_registeration, int32_t *len);
 static int endpoint_fill_uri_query_options(endpoint_t *endpoint, sn_coap_hdr_s *source_msg_ptr, bool update, const char *uri_query);
@@ -122,8 +126,10 @@ static void endpoint_coap_timer(void *ep);
 static size_t endpoint_itoa_len(uint32_t value);
 static uint8_t *endpoint_itoa(uint8_t *ptr, uint32_t value);
 static int get_nsdl_address(const endpoint_t *endpoint, sn_nsdl_addr_s *address);
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
 static void endpoint_request_coap_ping(endpoint_t *endpoint);
 static void calculate_new_coap_ping_send_time(endpoint_t *endpoint);
+#endif
 
 static bool endpoint_command(endpoint_t *endpoint, unsigned message_type);
 
@@ -131,7 +137,9 @@ static void endpoint_coap_timer(void *ep)
 {
     endpoint_t *endpoint = ep;
     sn_coap_protocol_exec(endpoint->coap, endpoint->coap_time++);
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
     endpoint_request_coap_ping(endpoint);
+#endif
 }
 
 void endpoint_init(endpoint_t *endpoint, connection_t *connection,
@@ -156,13 +164,14 @@ void endpoint_init(endpoint_t *endpoint, connection_t *connection,
     endpoint->location = NULL; //TODO: Check if this information could be read from other fields.
     endpoint->custom_uri_query_params = NULL;
 
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
     endpoint->coap_ping_id = 0;
     endpoint->coap_ping_request = false;
+    endpoint->next_coap_ping_send_time = 0;
+#endif
 
     endpoint->message_type = ENDPOINT_MSG_UNDEFINED;
     endpoint->last_message_type = ENDPOINT_MSG_UNDEFINED;
-
-    endpoint->next_coap_ping_send_time = 0;
 
     endpoint->confirmable_response = (endpoint_confirmable_response_t) {{0}};
 
@@ -237,7 +246,7 @@ void endpoint_stop(endpoint_t *endpoint)
     get_handler_set_resend_status();
 
     // Request runtime for GET handler to continue later if required.
-    send_queue_request(endpoint, (SEND_QUEUE_REQUEST));
+    send_queue_request(endpoint, SEND_QUEUE_REQUEST);
 }
 
 void endpoint_destroy(endpoint_t *endpoint)
@@ -319,11 +328,15 @@ int endpoint_reset_binding_mode(registry_t *registry, const oma_lwm2m_binding_an
 
         switch (mode) {
             case BINDING_MODE_U:
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
             case BINDING_MODE_T:
+#endif
                 binding_mode = BINDING_MODE_UDP;
                 break;
             case BINDING_MODE_Q:
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
             case BINDING_MODE_T_Q:
+#endif
                 binding_mode = BINDING_MODE_UDP_QUEUE;
                 break;
             case BINDING_MODE_S:
@@ -557,7 +570,9 @@ static uint8_t coap_tx_callback(uint8_t *data_ptr, uint16_t data_len, sn_nsdl_ad
         endpoint_start_coap_exec_timer(endpoint);
     }
 
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
     calculate_new_coap_ping_send_time(endpoint);
+#endif
 
 #if MBED_CONF_MBED_TRACE_ENABLE
     coap_version_e version = COAP_VERSION_UNKNOWN;
@@ -747,7 +762,9 @@ int endpoint_send_coap_message(endpoint_t *endpoint, sn_nsdl_addr_s *address_ptr
     }
     // No need to fail the call at this point as the CoAP library takes care of re-sending if needed now.
 
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
     calculate_new_coap_ping_send_time(endpoint);
+#endif
 
     tr_info("endpoint_send_coap_message connection_send_data OK.");
     return ENDPOINT_STATUS_OK;
@@ -994,6 +1011,7 @@ static int endpoint_oma_bootstrap(endpoint_t *endpoint, sn_nsdl_addr_s *bootstra
 
 }
 
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 // this has slightly different naming as other write_X functions, but it keeps diff smaller
 static uint8_t *write_bs_uri_query_options(uint8_t *temp_ptr, const endpoint_t *endpoint,
                                      const char *uri_query,
@@ -1010,6 +1028,7 @@ static uint8_t *write_bs_uri_query_options(uint8_t *temp_ptr, const endpoint_t *
     }
     return temp_ptr;
 }
+#endif
 
 static int endpoint_internal_coap_send(endpoint_t *endpoint, sn_coap_hdr_s *coap_header_ptr, sn_nsdl_addr_s *dst_addr_ptr, uint8_t message_description)
 {
@@ -1127,6 +1146,7 @@ static void endpoint_handle_response(endpoint_t *endpoint, sn_coap_hdr_s *coap_h
         return;
     }
 
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
     if (coap_header->msg_id == endpoint->coap_ping_id) {
 
         endpoint->coap_ping_id = 0;
@@ -1141,6 +1161,7 @@ static void endpoint_handle_response(endpoint_t *endpoint, sn_coap_hdr_s *coap_h
         }
         return;
     }
+#endif
 
     if (get_handler_handle_response(endpoint, coap_header) || handle_coap_response(endpoint, coap_header) ) {
         // Response was handled.
@@ -1686,7 +1707,11 @@ static uint8_t *write_uri_query_options(uint8_t *temp_ptr, const endpoint_t *end
     /* If queue-mode is configured, fill needed fields    */
     /******************************************************/
 
-    if (((endpoint->mode & 0x01) || (endpoint->mode & 0x04)) && !update) {
+    if (((endpoint->mode & BINDING_MODE_U) || (endpoint->mode & BINDING_MODE_Q)
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
+         || (endpoint->mode & BINDING_MODE_T)
+#endif
+        ) && !update) {
         if (!first_param) {
             temp_ptr = write_char(temp_ptr, '&', buffer_left);
         }
@@ -1694,18 +1719,19 @@ static uint8_t *write_uri_query_options(uint8_t *temp_ptr, const endpoint_t *end
 
         temp_ptr = write_string(temp_ptr, bs_queue_mode, buffer_left);
 
-        if (endpoint->mode & 0x01) {
+        if (endpoint->mode & BINDING_MODE_U
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
+            || endpoint->mode & BINDING_MODE_T
+#endif
+           ) {
             temp_ptr = write_char(temp_ptr, 'U', buffer_left);
-            if (endpoint->mode & 0x02) {
-                temp_ptr = write_char(temp_ptr, 'Q', buffer_left);
-            }
-        }
-
-        if (endpoint->mode & 0x04) {
-            temp_ptr = write_char(temp_ptr, 'S', buffer_left);
-            if ((endpoint->mode & 0x02) && !(endpoint->mode & 0x01)) {
-                temp_ptr = write_char(temp_ptr, 'Q', buffer_left);
-            }
+        } else if (endpoint->mode & BINDING_MODE_Q
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
+            || endpoint->mode & BINDING_MODE_T_Q
+#endif
+           ) {
+            temp_ptr = write_char(temp_ptr, 'U', buffer_left);
+            temp_ptr = write_char(temp_ptr, 'Q', buffer_left);
         }
     }
 
@@ -2070,6 +2096,7 @@ bool endpoint_set_uri_query_parameters(endpoint_t *endpoint, const char *uri_que
     return true;
 }
 
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
 static void endpoint_request_coap_ping(endpoint_t *endpoint)
 {
 
@@ -2107,7 +2134,6 @@ void endpoint_send_coap_ping(endpoint_t *endpoint)
     } else {
         endpoint->coap_ping_id = coap_ping.msg_id;
     }
-
 }
 
 static void calculate_new_coap_ping_send_time(endpoint_t *endpoint)
@@ -2115,6 +2141,7 @@ static void calculate_new_coap_ping_send_time(endpoint_t *endpoint)
     endpoint->next_coap_ping_send_time = endpoint->coap_time + MBED_CLIENT_TCP_KEEPALIVE_INTERVAL;
     endpoint->coap_ping_request = false;
 }
+#endif
 
 static bool endpoint_command(endpoint_t *endpoint, unsigned message_type)
 {

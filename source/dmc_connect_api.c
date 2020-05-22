@@ -67,7 +67,8 @@ static bool update_client_initialized = false;
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
 #include "fota/fota.h"
-#include "fota/fota_app_ifs.h"
+
+static void fota_update_init(void);
 #endif
 
 #define TRACE_GROUP "pdmc"
@@ -99,7 +100,7 @@ static void pdmc_connect_event_handler(arm_event_s *event);
 static void print_registry_status_code(registry_status_t status);
 static void send_event(uint8_t event_type);
 static void forward_event_to_external_interface(arm_event_t *orig_event);
-static oma_lwm2m_binding_and_mode_t get_binding_mode();
+static oma_lwm2m_binding_and_mode_t get_binding_mode(void);
 static registry_status_t reboot_callback(registry_callback_type_t type,
                                          const registry_path_t *path,
                                          const registry_callback_token_t *token,
@@ -110,7 +111,7 @@ static registry_status_t reboot_callback(registry_callback_type_t type,
 /**
 * \brief initialises update
 */
-void pdmc_connect_init_update();
+void pdmc_connect_init_update(void);
 
 /**
 * \brief setups default device objects
@@ -138,16 +139,17 @@ static void pdmc_connect_event_handler(arm_event_t *event)
 
     switch (event->event_id) {
         case APPLICATION_EVENT_HANDLER_UPDATE_INIT:
+#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+            fota_update_init();
+#endif
 #ifdef MBED_CLOUD_CLIENT_SUPPORT_UPDATE
             if (!update_client_initialized) {
                 update_client_initialization();
-            } else {
-                send_event(APPLICATION_EVENT_REGISTER);
                 break;
             }
-#else       // we should make state machinbe progress even if update is not enabled
-            send_event(APPLICATION_EVENT_REGISTER);
 #endif // MBED_CLOUD_CLIENT_SUPPORT_UPDATE
+            // we should make state machine progress even if update is not enabled
+            send_event(APPLICATION_EVENT_REGISTER);
             break;
 
         case APPLICATION_EVENT_START_BOOTSTRAP:
@@ -164,7 +166,14 @@ static void pdmc_connect_event_handler(arm_event_t *event)
             lwm2m_interface_register_object(&interface, 0);
             break;
         case APPLICATION_EVENT_PAUSE:
+#ifdef MBED_CONF_CLOUD_CLIENT_USE_SOFT_PAUSE_RESUME
+            // The "soft pause" will not cause teardown of mbedtls layer, which allows one
+            // to just perform a socket re-establishment and continue using the DTLS session
+            // as-is, without the heavy handshake process.
+            lwm2m_interface_pause(&interface);
+#else
             lwm2m_interface_stop(&interface);
+#endif
             break;
         case APPLICATION_EVENT_RESUME:
             lwm2m_interface_resume(&interface);
@@ -296,7 +305,7 @@ static registry_status_t reboot_callback(registry_callback_type_t type,
     return REGISTRY_STATUS_OK;
 }
 
-static oma_lwm2m_binding_and_mode_t get_binding_mode()
+static oma_lwm2m_binding_and_mode_t get_binding_mode(void)
 {
 #ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP
     return BINDING_MODE_U;
@@ -304,11 +313,13 @@ static oma_lwm2m_binding_and_mode_t get_binding_mode()
 #ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
     return BINDING_MODE_Q;
 #endif
-#ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP
-    return BINDING_MODE_T;
-#endif
-#ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE
-    return BINDING_MODE_T_Q;
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
+    #ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP
+        return BINDING_MODE_T;
+    #endif
+    #ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE
+        return BINDING_MODE_T_Q;
+    #endif
 #endif
 }
 
@@ -366,13 +377,6 @@ void pdmc_connect_init(uint8_t event_handler_id)
     assert(result);
     (void) result;
 
-#if MBED_CLOUD_CLIENT_FOTA_ENABLE
-    // Init FOTA if it's enabled
-    int fota_status = fota_init(&interface.endpoint);
-    assert(!fota_status);
-    (void) fota_status;
-#endif
-
     arm_event_t evt = {0};
     evt.receiver = app_event_handler_id;
     evt.event_id = M2M_CLIENT_EVENT_SETUP_COMPLETED;
@@ -387,7 +391,7 @@ void pdmc_connect_init(uint8_t event_handler_id)
     simple_m2m_create_optional_default_objects();  // init manufactor modelnumber and serial
 }
 
-void pdmc_connect_deinit()
+void pdmc_connect_deinit(void)
 {
     eventOS_cancel(&user_allocated_event);
     lwm2m_interface_clean(&interface);
@@ -404,7 +408,7 @@ void pdmc_connect_register(void *iface)
     }
 }
 
-void pdmc_connect_init_update()
+void pdmc_connect_init_update(void)
 {
     send_event(APPLICATION_EVENT_HANDLER_UPDATE_INIT);
 }
@@ -419,7 +423,7 @@ void pdmc_connect_register_update(void)
     send_event(APPLICATION_EVENT_REGISTRATION_UPDATE);
 }
 
-void pdmc_connect_pause()
+void pdmc_connect_pause(void)
 {
     send_event(APPLICATION_EVENT_PAUSE);
 }
@@ -431,7 +435,7 @@ void pdmc_connect_resume(void *iface)
 }
 
 int pdmc_connect_add_cloud_resource(registry_t *registry, registry_path_t *path,
-                                    const int16_t object, const int16_t object_instance, const int16_t resource,
+                                    const uint16_t object, const uint16_t object_instance, const uint16_t resource,
                                     bool auto_observable, registry_callback_t callback)
 {
     registry_status_t ret;
@@ -487,9 +491,11 @@ void pdmc_connect_update_set_progress_handler(void (*progress_handler)(uint32_t 
     ARM_UC_SetProgressHandler(progress_handler);
 }
 
-static void update_client_initialization()
+static void update_client_initialization(void)
 {
     tr_info("update_client_initialization");
+
+    // Init FOTA if it's enabled
 
     ARM_UCS_LWM2M_SOURCE_endpoint_set(&interface.endpoint);
 
@@ -550,51 +556,14 @@ static bool schedule_update_event(arm_event_storage_t *ev, void *cb, uintptr_t p
 
 #endif // MBED_CLOUD_CLIENT_SUPPORT_UPDATE
 
-#ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
-
-int fota_app_on_authorization_request(fota_app_request_type_e type, uint32_t token, uint32_t priority)
+#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+static void fota_update_init(void)
 {
-    switch (type) {
-        /* Cloud Client wishes to download new firmware. This can have a negative
-           impact on the performance of the rest of the system.
-
-           The user application is supposed to pause performance sensitive tasks
-           before authorizing the download.
-
-           Note: the authorization call can be postponed and called later.
-           This doesn't affect the performance of the Cloud Client.
-        */
-        case FOTA_APP_AUTHORIZATION_TYPE_DOWNLOAD:
-            tr_info("Firmware download requested (priority=%d)\n", priority);
-            tr_info("Authorization granted\n");
-            fota_app_authorize(token);
-            break;
-        /* Application can reject an update in the following way
-           fota_app_reject(token, 127);
-           Reason error code will be logged
-        */
-
-
-        /* Cloud Client wishes to reboot and apply the new firmware.
-
-           The user application is supposed to save all current work before rebooting.
-
-           Note: the authorization call can be postponed and called later.
-           This doesn't affect the performance of the Cloud Client.
-        */
-        case FOTA_APP_AUTHORIZATION_TYPE_INSTALL:
-            tr_info("Firmware install requested (priority=%d)\n", priority);
-            tr_info("Authorization granted\n");
-            fota_app_authorize(token);
-            break;
-
-        default:
-            assert(false);  // should not get here
-            break;
-    }
-    return FOTA_STATUS_SUCCESS;
+    // Init FOTA if it's enabled
+    int fota_status = fota_init(&interface.endpoint);
+    assert(!fota_status);
+    (void) fota_status;
 }
-
-#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
+#endif
 
 #endif // MBED_CONF_MBED_CLIENT_ENABLE_CPP_API

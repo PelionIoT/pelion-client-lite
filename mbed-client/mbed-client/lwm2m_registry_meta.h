@@ -83,7 +83,9 @@ typedef enum lwm2m_resource_meta_definition_constants_types {
     LWM2M_RESOURCE_TYPE_NONE            = 0, ///< No type.
     LWM2M_RESOURCE_TYPE_STRING          = 1, ///< String Resource.
     LWM2M_RESOURCE_TYPE_INTEGER         = 2, ///< 64-bit signed integer Resource.
+#if MBED_CLIENT_ENABLE_FLOAT_VALUE
     LWM2M_RESOURCE_TYPE_FLOAT           = 3, ///< Float Resource.
+#endif
     LWM2M_RESOURCE_TYPE_BOOLEAN         = 4, ///< Boolean Resource.
     LWM2M_RESOURCE_TYPE_OPAQUE          = 5, ///< Opaque Resource.
     LWM2M_RESOURCE_TYPE_TIME            = 6, ///< Time Resource.

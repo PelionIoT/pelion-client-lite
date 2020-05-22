@@ -55,9 +55,10 @@ extern "C" {
 #define PROTOMAN_ERR_INTERNAL_ERROR           -12
 #define PROTOMAN_ERR_NETWORK_ERROR            -13
 #define PROTOMAN_ERR_TOO_BIG_PACKET           -14
-#define PROTOMAN_ERR_NOT_IMPLEMENTED          -15
+#define PROTOMAN_ERR_NOSOCKET                 -15
+#define PROTOMAN_ERR_NOT_IMPLEMENTED          -16
 #ifdef PROTOMAN_SANITY
-#define PROTOMAN_ERR_SANITY                   -16 /* Used for sanity checks in development phase */
+#define PROTOMAN_ERR_SANITY                   -17 /* Used for sanity checks in development phase */
 #endif // PROTOMAN_SANITY
 
 /* Protoman states */
@@ -69,6 +70,10 @@ extern "C" {
 #define PROTOMAN_STATE_DISCONNECTED     5
 #define PROTOMAN_STATE_ERRORING         6
 #define PROTOMAN_STATE_ERRORED          7
+#define PROTOMAN_STATE_PAUSING          8
+#define PROTOMAN_STATE_PAUSED           9
+#define PROTOMAN_STATE_RESUMING        10
+#define PROTOMAN_STATE_RESUMED         11
 
 
 #define PROTOMAN_EVENT_BELONGS_TO_CORE 100 /* This can be freely increased if more space is needed, it is added to the original event */
@@ -79,6 +84,8 @@ extern "C" {
 #define PROTOMAN_EVENT_CONNECTED         8
 #define PROTOMAN_EVENT_DISCONNECTED      9
 #define PROTOMAN_EVENT_ERROR            10
+#define PROTOMAN_EVENT_PAUSED           11
+#define PROTOMAN_EVENT_RESUMED          12
 
 #define PROTOMAN_EVENT_PRIORITY_LOW  0
 #define PROTOMAN_EVENT_PRIORITY_MED  1
@@ -234,6 +241,10 @@ extern void protoman_connect(protoman_id_t protoman_id);
  * @param protoman_id Protocol Manager ID.
  */
 extern void protoman_disconnect(protoman_id_t protoman_id);
+
+extern void protoman_pause(protoman_id_t protoman_id);
+extern void protoman_resume(protoman_id_t protoman_id);
+
 
 /**
  * Closes Protocol Manager resources and all layers.

@@ -93,6 +93,8 @@ struct protoman_layer_run_delays_s {
     uint32_t do_write;        /* Delay to wait if do_write()      returns PROTOMAN_STATE_RETVAL_AGAIN */
     uint32_t do_read;         /* Delay to wait if do_read()       returns PROTOMAN_STATE_RETVAL_AGAIN */
     uint32_t do_disconnect;   /* Delay to wait if do_disconnect() returns PROTOMAN_STATE_RETVAL_AGAIN */
+    uint32_t do_pause;        /* Delay to wait if do_pause()      returns PROTOMAN_STATE_RETVAL_AGAIN */
+    uint32_t do_resume;       /* Delay to wait if do_pause()      returns PROTOMAN_STATE_RETVAL_AGAIN */
 };
 
 struct protoman_layer_s {
@@ -221,7 +223,7 @@ struct protoman_config_drop_s {
 /*  Config - pcap
  * --------------- */
 struct protoman_config_pcap_s {
-    char *pcap_file_path;
+    const char *pcap_file_path;
     int pcap_linktype;
 };
 
@@ -386,7 +388,8 @@ struct protoman_layer_callbacks_s {
     protoman_layer_state_do_cb_t state_do_read;
     protoman_layer_state_do_cb_t state_do_write;
     protoman_layer_state_do_cb_t state_do_disconnect;
-
+    protoman_layer_state_do_cb_t state_do_pause;
+    protoman_layer_state_do_cb_t state_do_resume;
 };
 
 #ifdef __cplusplus

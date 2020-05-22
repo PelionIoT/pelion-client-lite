@@ -27,7 +27,8 @@
         "enable-publish-resource-value-in-reg-msg": true,
         "enable-float-value": true,
         "enable-observation-parameters": true,
-        "registry-object-count": null
+        "registry-object-count": null,
+        "set-lifetime-as-default-max-age": null
     },
     "macros" : [
         "MBED_CLIENT_C_NEW_API",

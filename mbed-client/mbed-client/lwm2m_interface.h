@@ -302,6 +302,8 @@ void lwm2m_interface_clean(lwm2m_interface_t *interface);
  */
 void lwm2m_interface_stop(lwm2m_interface_t *interface);
 
+void lwm2m_interface_pause(lwm2m_interface_t *interface);
+
 /**
  * \brief Resume operation after `lwm2m_interface_stop()`.
  *

@@ -679,6 +679,9 @@ static registry_status_t registry_add_object(registry_t *registry, const registr
         }
 
         if(current_path.path_type == path->path_type) {
+#if defined(MBED_CLIENT_SET_LIFETIME_AS_DEFAULT_MAX_AGE) && MBED_CLIENT_SET_LIFETIME_AS_DEFAULT_MAX_AGE
+            registry_set_max_age(registry, path, MBED_CLOUD_CLIENT_LIFETIME);
+#endif
             break;
         }
 
@@ -1599,6 +1602,7 @@ registry_status_t registry_object_has_sibling(const registry_t *registry, const 
     return status;
 }
 
+#ifdef MBED_CLIENT_ENABLE_DYNAMIC_CREATION
 registry_status_t registry_add_instance(registry_t *registry, registry_path_t *path) {
 
     registry_object_t* new_obj;
@@ -1657,6 +1661,7 @@ registry_status_t registry_add_instance(registry_t *registry, registry_path_t *p
 #endif
     return status;
 }
+#endif //MBED_CLIENT_ENABLE_DYNAMIC_CREATION
 
 registry_status_t registry_listen_events(registry_t *registry, void *data_ptr, registry_event_listen_mode_t mode, int8_t handler_id)
 {
@@ -1729,7 +1734,7 @@ registry_status_t registry_listen_events_stop(registry_t *registry, void *data_p
 
 }
 
-void registry_set_path(registry_path_t *path, const int16_t object, const int16_t object_instance, const int16_t resource, const int16_t resource_instance, const int8_t type)
+void registry_set_path(registry_path_t *path, const uint16_t object, const uint16_t object_instance, const uint16_t resource, const uint16_t resource_instance, const uint8_t type)
 {
     path->object_id = object;
     path->object_instance_id = object_instance;

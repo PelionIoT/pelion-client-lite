@@ -31,16 +31,6 @@
 
 #include <stdint.h>
 
-
-// BS_PATCH_COMPILE_TIME_MEMORY_ALLOC this allows allocating memory to bsdiff during compile time
-// basically to be safe this should be 2*framesize defined to bsdiff.
-//#define BS_PATCH_COMPILE_TIME_MEMORY_ALLOC 1024
-#ifndef BS_PATCH_COMPILE_TIME_MEMORY_ALLOC
-#warning "using default memory allocation"
-#define BS_PATCH_COMPILE_TIME_MEMORY_ALLOC 1024
-#endif
-
-
 struct bspatch_stream;
 
 // todo compile time assert from some header
@@ -51,7 +41,7 @@ struct bspatch_stream;
     typedef char _impl_PASTE(assertion_failed_##file##_,line)[2*!!(predicate)-1];
 
 #if defined( BS_PATCH_COMPILE_TIME_MEMORY_ALLOC ) && (BS_PATCH_COMPILE_TIME_MEMORY_ALLOC>0)
-COMPILE_TIME_ASSERT(BS_PATCH_COMPILE_TIME_MEMORY_ALLOC%sizeof(int64_t)==0)
+COMPILE_TIME_ASSERT(BS_PATCH_COMPILE_TIME_MEMORY_ALLOC % sizeof(int64_t) == 0)
 #endif
 
 // events used to feed ARM_BS_ProcessPatchEvent
@@ -61,7 +51,7 @@ typedef enum {
     EBSAPI_READ_OLD_DONE,
     EBSAPI_SEEK_OLD_DONE,
     EBSAPI_WRITE_NEW_DONE
-}bs_patch_api_event_t;
+} bs_patch_api_event_t;
 
 typedef enum {
     // errors
@@ -70,7 +60,7 @@ typedef enum {
     EBSAPI_ERR_ALREADY_INIT = -5,
     EBSAPI_ERR_OUT_OF_MEMORY        =     -4,
     EBSAPI_ERR_PARAMETERS  =    -3,  /* Values in struct bspatch_stream didn't make sense (callback was NULL, too small buffer_size... */
-    EBSAPI_ERR_FILE_IO=    -2,  /* One of the read/write calls returned an error. */
+    EBSAPI_ERR_FILE_IO =    -2, /* One of the read/write calls returned an error. */
     EBSAPI_ERR_CORRUPTED_PATCH = -1,
     // code for sync completion
     EBSAPI_OPERATION_DONE_IMMEDIATELY = 0,
@@ -81,15 +71,15 @@ typedef enum {
     EBSAPI_OPERATION_OLD_FILE_READ_WILL_COMPLETE_LATER,
     EBSAPI_OPERATION_OLD_FILE_SEEK_WILL_COMPLETE_LATER,
     EBSAPI_OPERATION_NEW_FILE_WRITE_WILL_COMPLETE_LATER
-}bs_patch_api_return_code_t;
+} bs_patch_api_return_code_t;
 
 typedef struct bspatch_stream bspatch_stream;
 
 // functions pointer prototypes for BS_PATCH_API
-typedef bs_patch_api_return_code_t (*read_patch_f)(const bspatch_stream* stream, void* buffer, uint64_t length);
-typedef bs_patch_api_return_code_t (*read_old_f)(const bspatch_stream* stream, void* buffer, uint64_t length);
-typedef bs_patch_api_return_code_t (*seek_old_f)(const bspatch_stream* stream, int64_t seek_diff);
-typedef bs_patch_api_return_code_t (*write_new_f)(const bspatch_stream* stream, void* buffer, uint64_t length);
+typedef bs_patch_api_return_code_t (*read_patch_f)(const bspatch_stream *stream, void *buffer, uint64_t length);
+typedef bs_patch_api_return_code_t (*read_old_f)(const bspatch_stream *stream, void *buffer, uint64_t length);
+typedef bs_patch_api_return_code_t (*seek_old_f)(const bspatch_stream *stream, int64_t seek_diff);
+typedef bs_patch_api_return_code_t (*write_new_f)(const bspatch_stream *stream, void *buffer, uint64_t length);
 
 /**
  * Initialize the bspatch control structure.
@@ -101,9 +91,9 @@ typedef bs_patch_api_return_code_t (*write_new_f)(const bspatch_stream* stream, 
  * @param sof, a function pointer to a function capable seeking the position in old file to be patched
  * @param wnf, a function pointer to a function capable writing new resulting file of patching
  */
-void ARM_BS_Init( bspatch_stream* stream, void* opaque,
-                  read_patch_f rpf, read_old_f rof,
-                  seek_old_f sof, write_new_f wnf);
+void ARM_BS_Init(bspatch_stream *stream, void *opaque,
+                 read_patch_f rpf, read_old_f rof,
+                 seek_old_f sof, write_new_f wnf);
 
 /**
  * Handles patch processing events.
@@ -112,20 +102,20 @@ void ARM_BS_Init( bspatch_stream* stream, void* opaque,
  * @return @see BsPatchApiReturnCode. EBsApiPatchDone if success and whole new file has been written, or code indicating asynch completion
  * from one of the API calls or any other non synch success code returned by API
  */
-bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream* stream, bs_patch_api_event_t bsApiEvent);
+bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream *stream, bs_patch_api_event_t bsApiEvent);
 
 /**
  * Gets opaque pointer from BS patch
  * @param stream pointer to relevant bspatch instance
  * @return opaque pointer given to bspatch during initialization with ARM_BS_Init .
  */
-void* ARM_BS_GetOpaque(const bspatch_stream* stream);
+void *ARM_BS_GetOpaque(const bspatch_stream *stream);
 
 /**
  * Frees the resources allocated by bspatch
  * @param stream pointer to relevant bspatch instance
  * @return 0
  */
-int ARM_BS_Free(bspatch_stream* stream);
+int ARM_BS_Free(bspatch_stream *stream);
 
 #endif

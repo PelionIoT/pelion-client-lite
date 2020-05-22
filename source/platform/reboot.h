@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-void mbed_client_default_reboot();
+void mbed_client_default_reboot(void);
 
 #ifdef __cplusplus
 }

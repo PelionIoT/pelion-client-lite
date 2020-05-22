@@ -49,7 +49,212 @@
 #define TRACE_GROUP "tlvs"
 
 
-registry_tlv_serialize_status_t registry_serialize_append_to_buffer(const uint8_t *value, int value_len, uint8_t **data, uint32_t *size);
+static registry_tlv_serialize_status_t registry_serialize_append_to_buffer(const uint8_t *value, int value_len, uint8_t **data, uint32_t *size);
+static bool is_dirty_object_instance(const registry_t* registry, const registry_listing_t* listing, const registry_observation_parameters_t *parameters);
+
+/*
+ * \brief Serializes resources under the given path
+ *
+ * \param registry Registry instance
+ * \param listing Registry iterator struct
+ * \param data Pointer to allocated data will be stored through this pointer
+ * \param size Size of allocated data will be stored through this pointer
+ * \param format Which format to use (text/plain or TLV)
+ *
+ * \return REGISTRY_TLV_SERIALIZE_STATUS_OK if everything went okay
+ *
+ */
+static registry_tlv_serialize_status_t registry_serialize_resources(const registry_t* registry,
+                                                             registry_listing_t* listing,
+                                                             registry_status_t *listing_status,
+                                                             bool every_resource,
+                                                             uint8_t** data, uint32_t *size,
+                                                             registry_serialization_format_t format,
+                                                             const bool dirty_only,
+                                                             registry_object_value_t *value,
+                                                             registry_observation_parameters_t *parameters);
+
+/*
+ * \brief Serializes registry data (object) under the given path
+ *
+ * \param registry Registry instance
+ * \param listing Registry iterator struct
+ * \param data Pointer to allocated data will be stored through this pointer
+ * \param size Size of allocated data will be stored through this pointer
+ * \param format Which format to use (text/plain or TLV)
+ * \param single_instance Serialize only one object instance, which requires special handling
+ *
+ * \return REGISTRY_TLV_SERIALIZE_STATUS_OK if everything went okay
+ *
+ */
+static registry_tlv_serialize_status_t registry_serialize_object(const registry_t* registry,
+                                                          registry_listing_t* listing,
+                                                          registry_status_t *listing_status,
+                                                          uint8_t **data,
+                                                          uint32_t *size,
+                                                          registry_serialization_format_t format,
+                                                          const bool dirty_only,
+                                                          bool single_instance,
+                                                          bool is_object_path);
+
+/*
+ * \brief Serializes a resource under the given path
+ *
+ * \param registry Registry instance
+ * \param listing Registry iterator struct
+ * \param data Pointer to allocated data will be stored through this pointer
+ * \param size Size of allocated data will be stored through this pointer
+ * \param format Serialization format
+ *
+ * \return REGISTRY_TLV_SERIALIZE_STATUS_OK if everything went okay
+ *
+ */
+static registry_tlv_serialize_status_t registry_serialize_resource(const registry_t* registry,
+                                                            registry_listing_t* listing,
+                                                            uint8_t **data, uint32_t *size,
+                                                            registry_serialization_format_t format,
+                                                            const bool dirty_only,
+                                                            const registry_object_value_t *registry_value,
+                                                            const registry_observation_parameters_t *parameters);
+
+/*
+ * \brief Serializes resource instances under the given path (resource)
+ *
+ * \param registry Registry instance
+ * \param listing Registry iterator struct
+ * \param data Pointer to allocated data will be stored through this pointer
+ * \param size Size of allocated data will be stored through this pointer
+ *
+ * \return REGISTRY_TLV_SERIALIZE_STATUS_OK if everything went okay
+ *
+ */
+static registry_tlv_serialize_status_t registry_serialize_multiple_resource(const registry_t* registry, registry_listing_t* listing, registry_status_t *listing_status, const bool dirty_only, registry_object_value_t *value, registry_observation_parameters_t *parameters, uint8_t **data, uint32_t *size);
+
+
+/*
+ * \brief Serializes an integer-type value under the given path
+ *
+ * \param registry Registry instance
+ * \param path Registry path struct
+ * \param type TLV type information
+ * \param id TLV field id
+ * \param data Pointer to allocated data will be stored through this pointer
+ * \param size Size of allocated data will be stored through this pointer
+ *
+ * \return REGISTRY_TLV_SERIALIZE_STATUS_OK if everything went okay
+ *
+ */
+static registry_tlv_serialize_status_t registry_serialize_TLV_binary_int(const registry_t* registry,
+                                                                    registry_path_t* path,
+                                                                    uint8_t type,
+                                                                    uint16_t id,
+                                                                    uint8_t **data,
+                                                                    uint32_t *size,
+                                                                    const registry_object_value_t *value);
+
+#if MBED_CLIENT_ENABLE_FLOAT_VALUE
+static registry_tlv_serialize_status_t registry_serialize_TLV_binary_float(const registry_t* registry,
+                                                                    uint8_t type,
+                                                                    uint16_t id,
+                                                                    uint8_t **data,
+                                                                    uint32_t *size,
+                                                                    const registry_object_value_t *value);
+#endif
+
+
+#if MBED_CLIENT_ENABLE_SERIALIZE_PLAINTEXT
+
+/**
+ * \brief Serializes a resource value (int, boolean, float, string) in text format as defined
+ *        in the OMA LWM2M specification.
+ *
+ * \param registry Registry instance
+ * \param path Registry path struct
+ * \param data Pointer to allocated string will be stored through this pointer
+ * \param size Size of allocated data will be stored through this pointer
+ *
+ * \return REGISTRY_TLV_SERIALIZE_STATUS_OK if everything went okay
+ */
+static registry_tlv_serialize_status_t registry_serialize_text_int(const registry_t* registry,
+                                                            uint8_t **data,
+                                                            uint32_t *size,
+                                                            const registry_object_value_t *value);
+
+static registry_tlv_serialize_status_t registry_serialize_text_bool(const registry_t* registry,
+                                                            uint8_t **data,
+                                                            uint32_t *size,
+                                                            const registry_object_value_t *value);
+
+#if MBED_CLIENT_ENABLE_FLOAT_VALUE
+static registry_tlv_serialize_status_t registry_serialize_text_float(const registry_t* registry,
+                                                              uint8_t **data,
+                                                              uint32_t *size,
+                                                              const registry_object_value_t *value);
+#endif
+
+static registry_tlv_serialize_status_t registry_serialize_text_string(const registry_t* registry,
+                                                               uint8_t **data,
+                                                               uint32_t *size,
+                                                               const registry_object_value_t *value);
+
+#endif // MBED_CLIENT_ENABLE_SERIALIZE_PLAINTEXT
+
+/*
+ * \brief Serializes a generic data blob of given size as OMA-TLV
+ *
+ * \param type TLV type information
+ * \param id TLV id field
+ * \param value Pointer to the data which needs to be serialized
+ * \param value_length Length of data
+ * \param data Pointer to allocated data will be stored through this pointer
+ * \param size Size of allocated data will be stored through this pointer
+ *
+ * \return REGISTRY_TLV_SERIALIZE_STATUS_OK if everything went okay
+ */
+static registry_tlv_serialize_status_t registry_serialize_TILV(uint8_t type, uint16_t id, const uint8_t *value, uint32_t value_length, uint8_t **data, uint32_t *size);
+
+/*
+ * \brief Serializes a 16bit value (TLV ID field) to the given buffer
+ *
+ * \param id TLV id field value
+ * \param size Size of written data will be stored through this pointer
+ * \param id_ptr Pointer to data buffer where the value will be serialized to.
+ */
+static void registry_serialize_id(uint16_t id, uint32_t *size, uint8_t *id_ptr);
+
+/*
+ * \brief Serializes a 32bit value (TLV length field) to the given buffer
+ *
+ * \param id TLV length field value
+ * \param size Size of written data will be stored through this pointer
+ * \param length_ptr Pointer to data buffer where the value will be serialized to.
+ */
+static void registry_serialize_length(uint32_t length, uint32_t *size, uint8_t *length_ptr);
+
+
+static registry_tlv_serialize_status_t registry_deserialize_resources(registry_t* registry,
+                                                               const registry_path_t* path,
+                                                               const uint8_t* tlv,
+                                                               uint32_t tlv_size,
+                                                               registry_tlv_serialize_operation_t operation);
+
+static registry_tlv_serialize_status_t registry_deserialize_resource(registry_t* registry,
+                                                              const registry_path_t* path,
+                                                              const uint8_t* tlv,
+                                                              uint32_t tlv_size,
+                                                              registry_tlv_serialize_operation_t operation);
+
+static registry_tlv_serialize_status_t registry_deserialize_resource_tlv(registry_t* registry,
+                                                              const registry_path_t* path,
+                                                              registry_tlv_t* til,
+                                                              registry_tlv_serialize_operation_t operation);
+
+static registry_tlv_serialize_status_t registry_deserialize_resource_instances(registry_t* registry,
+                                                                        const registry_path_t* path,
+                                                                        const uint8_t* tlv,
+                                                                        uint32_t tlv_size,
+                                                                        registry_tlv_serialize_operation_t operation);
+
 
 uint8_t* registry_serialize(const registry_t* registry,
                             const registry_path_t* path,
@@ -62,6 +267,7 @@ uint8_t* registry_serialize(const registry_t* registry,
     registry_listing_t listing;
     registry_object_value_t value;
     registry_observation_parameters_t parameters;
+    bool is_object_path = false;
 
     const lwm2m_resource_meta_definition_t* meta_data;
 
@@ -107,6 +313,15 @@ uint8_t* registry_serialize(const registry_t* registry,
         return NULL;
     }
 
+    //Always send every value in object_instance level notification
+    if (listing.path.path_type == REGISTRY_PATH_OBJECT_INSTANCE) {
+        dirty_only = false;
+    }
+
+    if (listing.path.path_type == REGISTRY_PATH_OBJECT) {
+        is_object_path = true;
+    }
+
     while (REGISTRY_STATUS_OK == iter_status && (*status == REGISTRY_TLV_SERIALIZE_STATUS_OK || *status == REGISTRY_TLV_SERIALIZE_STATUS_NOT_FOUND)) {
 
         if (listing.path.path_type == REGISTRY_PATH_OBJECT_INSTANCE) {
@@ -118,7 +333,7 @@ uint8_t* registry_serialize(const registry_t* registry,
 
             bool single_object_instance = REGISTRY_PATH_OBJECT_INSTANCE == path->path_type;
 
-            *status = registry_serialize_object(registry, &listing, &iter_status, &tlv_data, &tlv_data_size, format, dirty_only, single_object_instance);
+            *status = registry_serialize_object(registry, &listing, &iter_status, &tlv_data, &tlv_data_size, format, dirty_only, single_object_instance, is_object_path);
 
 
         } else if (listing.path.path_type == REGISTRY_PATH_RESOURCE) {
@@ -162,7 +377,7 @@ uint8_t* registry_serialize(const registry_t* registry,
 
 
 
-registry_tlv_serialize_status_t registry_serialize_resources(const registry_t* registry,
+static registry_tlv_serialize_status_t registry_serialize_resources(const registry_t* registry,
                                       registry_listing_t* listing,
                                       registry_status_t *listing_status,
                                       bool every_resource,
@@ -176,7 +391,6 @@ registry_tlv_serialize_status_t registry_serialize_resources(const registry_t* r
     registry_tlv_serialize_status_t status;
 
     do {
-
         if (listing->value_set) {
             status = registry_serialize_resource(registry, listing, data, size, format, dirty_only, value, parameters);
             *listing_status = registry_get_objects(registry, listing, value, parameters);
@@ -192,14 +406,43 @@ registry_tlv_serialize_status_t registry_serialize_resources(const registry_t* r
 
 }
 
-registry_tlv_serialize_status_t registry_serialize_object(const registry_t* registry,
+
+static bool is_dirty_object_instance(const registry_t* registry,
+                                     const registry_listing_t* listing,
+                                     const registry_observation_parameters_t *parameters)
+{
+    //Create copies to prevent changing listing during object instance check
+    registry_listing_t listing_cpy;
+    registry_observation_parameters_t parameters_cpy;
+    listing_cpy = *listing;
+    parameters_cpy = *parameters;
+
+    registry_status_t listing_status = REGISTRY_STATUS_OK;
+    registry_tlv_serialize_status_t status = REGISTRY_TLV_SERIALIZE_STATUS_NOT_FOUND;
+    registry_object_value_t value;
+
+    do {
+        if (!(listing_cpy.parameters_set) || parameters_cpy.dirty) {
+            return true;
+        }
+        listing_status = registry_get_objects(registry, &listing_cpy, &value, &parameters_cpy);
+    } while (listing_cpy.path.path_type >= REGISTRY_PATH_RESOURCE &&
+             listing_status == REGISTRY_STATUS_OK &&
+             (status == REGISTRY_TLV_SERIALIZE_STATUS_OK || status == REGISTRY_TLV_SERIALIZE_STATUS_NOT_FOUND));
+
+    return false;
+}
+
+
+static registry_tlv_serialize_status_t registry_serialize_object(const registry_t* registry,
                                                           registry_listing_t* listing,
                                                           registry_status_t *listing_status,
                                                           uint8_t **data,
                                                           uint32_t *size,
                                                           registry_serialization_format_t format,
-                                                          const bool dirty_only,
-                                                          bool single_instance)
+                                                          bool dirty_only,
+                                                          bool single_instance,
+                                                          bool is_object_path)
 {
 
     uint8_t *resource_data = NULL;
@@ -214,6 +457,13 @@ registry_tlv_serialize_status_t registry_serialize_object(const registry_t* regi
     if (REGISTRY_STATUS_OK != (*listing_status = registry_get_objects(registry, listing, &value, &parameters)) ||
         listing->path.path_type < REGISTRY_PATH_RESOURCE) {
         return status;
+    }
+
+    //In the case object path, whole instance should be sent even if only one resource is dirty
+    if (is_object_path) {
+        if (dirty_only && is_dirty_object_instance(registry, listing, &parameters)) {
+            dirty_only = false;
+        }
     }
 
     status = registry_serialize_resources(registry, listing, listing_status, true, &resource_data, &resource_size, format, dirty_only, &value, &parameters);
@@ -249,8 +499,8 @@ registry_tlv_serialize_status_t registry_serialize_resource(const registry_t* re
                                                             uint32_t *size,
                                                             registry_serialization_format_t format,
                                                             const bool dirty_only,
-                                                            registry_object_value_t *registry_value,
-                                                            registry_observation_parameters_t *parameters)
+                                                            const registry_object_value_t *registry_value,
+                                                            const registry_observation_parameters_t *parameters)
 {
 
     registry_tlv_serialize_status_t status = REGISTRY_TLV_SERIALIZE_STATUS_NOT_FOUND;
@@ -328,7 +578,7 @@ registry_tlv_serialize_status_t registry_serialize_resource(const registry_t* re
 
 #if MBED_CLIENT_ENABLE_FLOAT_VALUE
             case LWM2M_RESOURCE_TYPE_FLOAT:
-                status = registry_serialize_TLV_binary_float(registry, &listing->path, resource_type, resource_id, data, size, registry_value);
+                status = registry_serialize_TLV_binary_float(registry, resource_type, resource_id, data, size, registry_value);
                 break;
 #endif
 
@@ -343,35 +593,44 @@ registry_tlv_serialize_status_t registry_serialize_resource(const registry_t* re
     /* caller may want to get TLV back even for single resource */
     else if (format == REGISTRY_SERIALIZE_PLAINTEXT) {
 
-        switch (resdef->type) {
+        bool empty = false;
 
-            case LWM2M_RESOURCE_TYPE_INTEGER:
-            case LWM2M_RESOURCE_TYPE_TIME:
-                status = registry_serialize_text_int(registry, &listing->path, data, size, registry_value);
-                break;
+        if (REGISTRY_STATUS_OK == registry_is_value_empty(registry, &listing->path, &empty) && !empty) {
 
-            case LWM2M_RESOURCE_TYPE_BOOLEAN:
-                status = registry_serialize_text_bool(registry, &listing->path, data, size, registry_value);
-                break;
+            switch (resdef->type) {
 
-            case LWM2M_RESOURCE_TYPE_STRING:
-                status = registry_serialize_text_string(registry, &listing->path, data, size, registry_value);
-                break;
+                case LWM2M_RESOURCE_TYPE_INTEGER:
+                case LWM2M_RESOURCE_TYPE_TIME:
+                    status = registry_serialize_text_int(registry, data, size, registry_value);
+                    break;
 
-            case LWM2M_RESOURCE_TYPE_OPAQUE:
-                status = REGISTRY_TLV_SERIALIZE_STATUS_INVALID_INPUT; //TODO: Check if this is right error code?
-                break;
+                case LWM2M_RESOURCE_TYPE_BOOLEAN:
+                    status = registry_serialize_text_bool(registry, data, size, registry_value);
+                    break;
+
+                case LWM2M_RESOURCE_TYPE_STRING:
+                    status = registry_serialize_text_string(registry, data, size, registry_value);
+                    break;
+
+                case LWM2M_RESOURCE_TYPE_OPAQUE:
+                    status = registry_serialize_append_to_buffer(registry_value->generic_value.data.opaque_data->data,
+                                                                    registry_value->generic_value.data.opaque_data->size,
+                                                                    data, size);
+                    break;
 
 #if MBED_CLIENT_ENABLE_FLOAT_VALUE
-            case LWM2M_RESOURCE_TYPE_FLOAT:
-                status = registry_serialize_text_float(registry, &listing->path, data, size, registry_value);
-                break;
+                case LWM2M_RESOURCE_TYPE_FLOAT:
+                    status = registry_serialize_text_float(registry, data, size, registry_value);
+                    break;
 #endif
 
-            default:
-                //TODO: Objlnk
-                assert(0);
+                default:
+                    //TODO: Objlnk
+                    assert(0);
 
+            }
+        } else {
+            status = REGISTRY_TLV_SERIALIZE_STATUS_NOT_FOUND;
         }
 
     }
@@ -384,7 +643,7 @@ registry_tlv_serialize_status_t registry_serialize_resource(const registry_t* re
     return status;
 }
 
-registry_tlv_serialize_status_t registry_serialize_multiple_resource(const registry_t* registry,
+static registry_tlv_serialize_status_t registry_serialize_multiple_resource(const registry_t* registry,
                                                                      registry_listing_t* listing,
                                                                      registry_status_t *listing_status,
                                                                      const bool dirty_only,
@@ -483,13 +742,13 @@ uint8_t *registry_write_int64(int64_t value, uint8_t *ptr, uint32_t *value_size)
 /* See, OMA-TS-LightweightM2M-V1_0-20170208-A, Appendix C,
  * Data Types, Integer, Boolean and TY
  * Yime, TLV Format */
-registry_tlv_serialize_status_t registry_serialize_TLV_binary_int(const registry_t* registry,
+static registry_tlv_serialize_status_t registry_serialize_TLV_binary_int(const registry_t* registry,
                                                                   registry_path_t* path,
                                                                   uint8_t type,
                                                                   uint16_t id,
                                                                   uint8_t **data,
                                                                   uint32_t *size,
-                                                                  registry_object_value_t *value)
+                                                                  const registry_object_value_t *value)
 {
     /* max len 8 bytes */
     uint8_t buffer[8];
@@ -500,9 +759,8 @@ registry_tlv_serialize_status_t registry_serialize_TLV_binary_int(const registry
     return registry_serialize_TILV(type, id, buffer, size_written, data, size);
 }
 
-registry_tlv_serialize_status_t registry_serialize_append_to_buffer(const uint8_t *value, int value_len, uint8_t **data, uint32_t *size)
+static registry_tlv_serialize_status_t registry_serialize_append_to_buffer(const uint8_t *value, int value_len, uint8_t **data, uint32_t *size)
 {
-
     tr_debug("registry_serialize_apppend_to_buffer() value_len: %d", value_len);
     if (!value || value_len < 0) {
 
@@ -531,71 +789,48 @@ registry_tlv_serialize_status_t registry_serialize_append_to_buffer(const uint8_
 }
 
 #if MBED_CLIENT_ENABLE_SERIALIZE_PLAINTEXT
-
-registry_tlv_serialize_status_t registry_serialize_text_int(const registry_t* registry,
-                                                            const registry_path_t* path,
+static registry_tlv_serialize_status_t registry_serialize_text_int(const registry_t* registry,
                                                             uint8_t **data,
                                                             uint32_t *size,
-                                                            registry_object_value_t *value)
+                                                            const registry_object_value_t *value)
 {
     char int64_string[REGISTRY_INT64_STRING_MAX_LEN];
 
-    bool empty = false;
+    tr_debug("registry_serialize_text_int() value: %" PRId64, value->int_value);
 
-    if (REGISTRY_STATUS_OK == registry_is_value_empty(registry, path, &empty) && !empty) {
+    /* write the integer value to a decimal number string and copy it into a buffer allocated for caller */
+    int value_len = snprintf(int64_string, REGISTRY_INT64_STRING_MAX_LEN, "%" PRId64, value->int_value);
 
-        tr_debug("registry_serialize_text_int() value: %" PRId64, value->int_value);
-
-        /* write the integer value to a decimal number string and copy it into a buffer allocated for caller */
-        int value_len = snprintf(int64_string, REGISTRY_INT64_STRING_MAX_LEN, "%" PRId64, value->int_value);
-
-        return registry_serialize_append_to_buffer((uint8_t*)int64_string, value_len, data, size);
-    }
-
-    return REGISTRY_TLV_SERIALIZE_STATUS_NOT_FOUND;
+    return registry_serialize_append_to_buffer((uint8_t*)int64_string, value_len, data, size);
 }
 
-registry_tlv_serialize_status_t registry_serialize_text_bool(const registry_t* registry,
-                                                            const registry_path_t* path,
+static registry_tlv_serialize_status_t registry_serialize_text_bool(const registry_t* registry,
                                                             uint8_t **data,
                                                             uint32_t *size,
-                                                            registry_object_value_t *value)
+                                                            const registry_object_value_t *value)
 {
-    bool empty = false;
+    tr_debug("registry_serialize_text_bool() value: %" PRId64, value->int_value);
 
-    if (REGISTRY_STATUS_OK == registry_is_value_empty(registry, path, &empty) && !empty) {
-        tr_debug("registry_serialize_text_bool() value: %" PRId64, value->int_value);
+    char bool_string;
 
-        char bool_string;
-
-        if (value->int_value == 0) {
-            bool_string = '0';
-        } else {
-            bool_string = '1';
-        }
-
-        return registry_serialize_append_to_buffer((uint8_t*)&bool_string, sizeof(bool_string), data, size);
+    if (value->int_value == 0) {
+        bool_string = '0';
+    } else {
+        bool_string = '1';
     }
 
-    return REGISTRY_TLV_SERIALIZE_STATUS_NOT_FOUND;
+    return registry_serialize_append_to_buffer((uint8_t*)&bool_string, sizeof(bool_string), data, size);
 }
 
 #if MBED_CLIENT_ENABLE_FLOAT_VALUE
-registry_tlv_serialize_status_t registry_serialize_text_float(const registry_t* registry,
-                                                              const registry_path_t* path,
+static registry_tlv_serialize_status_t registry_serialize_text_float(const registry_t* registry,
                                                               uint8_t **data,
                                                               uint32_t *size,
-                                                              registry_object_value_t *value)
+                                                              const registry_object_value_t *value)
 {
-    bool empty = false;
-
     // max length of double string in here is 33 bytes + zero terminator
     // Note: the "%e" really is formatting a double, not float, so we need space for it.
     char float_string[REGISTRY_DOUBLE_SCIENTIFIC_STRING_MAX_LEN];
-
-    if (REGISTRY_STATUS_OK != registry_is_value_empty(registry, path, &empty) && !empty) {
-        return REGISTRY_TLV_SERIALIZE_STATUS_NOT_FOUND;
-    }
 
     tr_debug("registry_serialize_text_float() value: %e", value->float_value);
 
@@ -607,37 +842,28 @@ registry_tlv_serialize_status_t registry_serialize_text_float(const registry_t* 
         return REGISTRY_TLV_SERIALIZE_STATUS_GENERIC_ERROR;
     }
 
-    registry_tlv_serialize_status_t status = registry_serialize_append_to_buffer((uint8_t*)float_string, value_len, data, size);
-
-    return status;
+    return registry_serialize_append_to_buffer((uint8_t*)float_string, value_len, data, size);
 }
 #endif
 
-registry_tlv_serialize_status_t registry_serialize_text_string(const registry_t* registry,
-                                                               const registry_path_t* path,
+static registry_tlv_serialize_status_t registry_serialize_text_string(const registry_t* registry,
                                                                uint8_t **data,
                                                                uint32_t *size,
-                                                               registry_object_value_t *value)
+                                                               const registry_object_value_t *value)
 {
 
-    bool empty = false;
-
-    if (REGISTRY_STATUS_OK == registry_is_value_empty(registry, path, &empty) && !empty) {
-        return registry_serialize_append_to_buffer((uint8_t*)value->generic_value.data.string, strlen(value->generic_value.data.string), data, size);
-    }
-    return REGISTRY_TLV_SERIALIZE_STATUS_NOT_FOUND;
+    return registry_serialize_append_to_buffer((uint8_t*)value->generic_value.data.string, strlen(value->generic_value.data.string), data, size);
 }
 
 #endif // MBED_CLIENT_ENABLE_SERIALIZE_PLAINTEXT
 
 #if MBED_CLIENT_ENABLE_FLOAT_VALUE
-registry_tlv_serialize_status_t registry_serialize_TLV_binary_float(const registry_t* registry,
-                                                                    registry_path_t* path,
+static registry_tlv_serialize_status_t registry_serialize_TLV_binary_float(const registry_t* registry,
                                                                     uint8_t type,
                                                                     uint16_t id,
                                                                     uint8_t **data,
                                                                     uint32_t *size,
-                                                                    registry_object_value_t *value)
+                                                                    const registry_object_value_t *value)
 {
     uint8_t buffer[4];
     // XXX: ugh. need fix this type coercion properly.
@@ -648,22 +874,22 @@ registry_tlv_serialize_status_t registry_serialize_TLV_binary_float(const regist
 
 
 
-registry_tlv_serialize_status_t registry_serialize_TILV(uint8_t type,
+static registry_tlv_serialize_status_t registry_serialize_TILV(uint8_t type,
                                                         uint16_t id,
-                                                        uint8_t *value,
+                                                        const uint8_t *value,
                                                         uint32_t value_length,
                                                         uint8_t **data,
                                                         uint32_t *size)
 {
 
-    uint8_t *tlv = 0;
+    uint8_t *tlv;
     const uint32_t type_length = TLV_TYPE_SIZE;
     type += id < 256 ? 0 : ID16;
     type += value_length < 8 ? value_length :
             value_length < 256 ? LENGTH8 :
             value_length < 65536 ? LENGTH16 : LENGTH24;
-    uint8_t tlv_type;
-    tlv_type = type & 0xFF;
+
+    const uint8_t tlv_type = type & 0xFF;
 
     uint32_t id_size;
     uint8_t id_array[MAX_TLV_ID_SIZE];
@@ -672,9 +898,19 @@ registry_tlv_serialize_status_t registry_serialize_TILV(uint8_t type,
     uint32_t length_size;
     uint8_t length_array[MAX_TLV_LENGTH_SIZE];
     registry_serialize_length(value_length, &length_size, length_array);
-    uint32_t new_data_size = *size + type_length + id_size + length_size + value_length;
 
-    tlv = (uint8_t*)lwm2m_alloc(new_data_size);
+    // Humm.. this does allocate the exact amount of memory needed for the end result. But
+    // the code could be saved a bit by actually allocating for the worst case scenario, which
+    // is at most just 3 bytes off the optimal. This function is ~250B long, partially
+    // due to this "optimization".
+    const uint32_t new_data_size = *size + type_length + id_size + length_size + value_length;
+
+    // Try to avoid fragmentation by reallocating existing block, if there is any.
+    if (*data) {
+        tlv = (uint8_t*)lwm2m_realloc(*data, new_data_size);
+    } else {
+        tlv = (uint8_t*)lwm2m_alloc(new_data_size);
+    }
     if (!tlv) {
         /* memory allocation has failed */
         /* return failure immediately */
@@ -684,21 +920,28 @@ registry_tlv_serialize_status_t registry_serialize_TILV(uint8_t type,
         return REGISTRY_TLV_SERIALIZE_STATUS_NO_MEMORY;
         /* eventually NULL will be returned to serializer public method caller */
     }
-    if(data) {
-        memcpy(tlv, *data, *size);
-        lwm2m_free(*data);
-    }
-    memcpy(tlv+*size, &tlv_type, type_length);
-    memcpy(tlv+*size+type_length, id_array, id_size);
-    memcpy(tlv+*size+type_length+id_size, length_array, length_size);
-    memcpy(tlv+*size+type_length+id_size+length_size, value, value_length);
+
+    // dest is buffer past the existing data, where the new TLV will be copied
+    uint8_t* dest = tlv + *size;
 
     *data = tlv;
-    *size += type_length + id_size + length_size + value_length;
+    *size = new_data_size;
+
+    memcpy(dest, &tlv_type, type_length);
+    dest += type_length;
+
+    memcpy(dest, id_array, id_size);
+    dest += id_size;
+
+    memcpy(dest, length_array, length_size);
+    dest += length_size;
+
+    memcpy(dest, value, value_length);
+
     return REGISTRY_TLV_SERIALIZE_STATUS_OK;
 }
 
-void registry_serialize_id(uint16_t id, uint32_t *size, uint8_t *id_ptr)
+static void registry_serialize_id(uint16_t id, uint32_t *size, uint8_t *id_ptr)
 {
 
     if(id > 255) {
@@ -711,7 +954,7 @@ void registry_serialize_id(uint16_t id, uint32_t *size, uint8_t *id_ptr)
     }
 }
 
-void registry_serialize_length(uint32_t length, uint32_t *size, uint8_t *length_ptr)
+static void registry_serialize_length(uint32_t length, uint32_t *size, uint8_t *length_ptr)
 {
 
     if (length > 65535) {
@@ -731,12 +974,12 @@ void registry_serialize_length(uint32_t length, uint32_t *size, uint8_t *length_
     }
 }
 
-bool registry_tlv_available(registry_tlv_t* stlv)
+static bool registry_tlv_available(registry_tlv_t* stlv)
 {
     return ((stlv->offset + stlv->length) < stlv->tlv_size);
 }
 
-void registry_tlv_init(registry_tlv_t* stlv, const uint8_t *tlv, uint32_t tlv_size)
+static void registry_tlv_init(registry_tlv_t* stlv, const uint8_t *tlv, uint32_t tlv_size)
 {
     stlv->tlv = tlv;
     stlv->tlv_size = tlv_size;
@@ -745,7 +988,7 @@ void registry_tlv_init(registry_tlv_t* stlv, const uint8_t *tlv, uint32_t tlv_si
 }
 
 
-registry_tlv_serialize_status_t registry_tlv_deserialize_id(registry_tlv_t* stlv, uint32_t idLength)
+static registry_tlv_serialize_status_t registry_tlv_deserialize_id(registry_tlv_t* stlv, uint32_t idLength)
 {
 
     if ((stlv->offset) >= stlv->tlv_size) {
@@ -764,7 +1007,7 @@ registry_tlv_serialize_status_t registry_tlv_deserialize_id(registry_tlv_t* stlv
     return REGISTRY_TLV_SERIALIZE_STATUS_OK;
 }
 
-registry_tlv_serialize_status_t registry_tlv_deserialize_length(registry_tlv_t* stlv, uint32_t lengthType)
+static registry_tlv_serialize_status_t registry_tlv_deserialize_length(registry_tlv_t* stlv, uint32_t lengthType)
 {
 
     if (lengthType > 0) {
@@ -791,7 +1034,7 @@ registry_tlv_serialize_status_t registry_tlv_deserialize_length(registry_tlv_t* 
     return REGISTRY_TLV_SERIALIZE_STATUS_OK;
 }
 
-registry_tlv_serialize_status_t registry_tlv_deserialize(registry_tlv_t* stlv)
+static registry_tlv_serialize_status_t registry_tlv_deserialize(registry_tlv_t* stlv)
 {
 
     if (stlv->offset + stlv->length >= stlv->tlv_size) {
@@ -826,7 +1069,7 @@ registry_tlv_serialize_status_t registry_tlv_deserialize(registry_tlv_t* stlv)
 /*
  * Read 1-8 bytes from given data and interpret them as network-byte-order integer.
  */
-uint64_t registry_tlv_read_uint64(const uint8_t* data, uint8_t size)
+static uint64_t registry_tlv_read_uint64(const uint8_t* data, uint8_t size)
 {
     uint64_t value = 0;
 
@@ -837,6 +1080,7 @@ uint64_t registry_tlv_read_uint64(const uint8_t* data, uint8_t size)
     return value;
  }
 
+// used by unit tests
 int64_t registry_tlv_read_int64(const uint8_t *data, uint8_t size)
 {
 
@@ -858,13 +1102,13 @@ int64_t registry_tlv_read_int64(const uint8_t *data, uint8_t size)
 /*
  * Wrap generic integer reading with values from given tlv struct.
  */
-int64_t registry_tlv_get_value_integer(const registry_tlv_t* tlvs)
+static int64_t registry_tlv_get_value_integer(const registry_tlv_t* tlvs)
 {
     return registry_tlv_read_int64(tlvs->tlv + tlvs->offset, tlvs->length);
 }
 
 #if MBED_CLIENT_ENABLE_FLOAT_VALUE
-float registry_tlv_get_value_float(const registry_tlv_t* tlvs)
+static float registry_tlv_get_value_float(const registry_tlv_t* tlvs)
 {
     uint32_t value;
     value = registry_tlv_read_uint64(tlvs->tlv + tlvs->offset, tlvs->length);
@@ -872,18 +1116,19 @@ float registry_tlv_get_value_float(const registry_tlv_t* tlvs)
 }
 #endif
 
+#if 0
 /*
  * Read uint16 from given data (network byte order)
  */
-uint16_t registry_tlv_read_uint16(const uint8_t* data)
+static uint16_t registry_tlv_read_uint16(const uint8_t* data)
 {
     uint8_t msb = data[0];
     uint8_t lsb = data[1];
     return (msb << 8) + lsb;
 }
+#endif
 
-
-const uint8_t* registry_tlv_get_value_string(registry_tlv_t* tlvs, uint32_t* length)
+static const uint8_t* registry_tlv_get_value_string(const registry_tlv_t* tlvs, uint32_t* length)
 {
     const uint8_t* tlv_value = tlvs->tlv + tlvs->offset;
     *length = tlvs->length;
@@ -891,7 +1136,8 @@ const uint8_t* registry_tlv_get_value_string(registry_tlv_t* tlvs, uint32_t* len
 }
 
 
-uint8_t registry_tlv_is_object_instance(const uint8_t *tlv, uint32_t offset)
+#if 0
+static uint8_t registry_tlv_is_object_instance(const uint8_t *tlv, uint32_t offset)
 {
     uint8_t ret = 0;
     if (tlv) {
@@ -900,7 +1146,7 @@ uint8_t registry_tlv_is_object_instance(const uint8_t *tlv, uint32_t offset)
     }
     return ret;
 }
-
+#endif
 
 registry_tlv_serialize_status_t registry_deserialize(registry_t* registry,
                                                      const registry_path_t* path,
@@ -934,11 +1180,14 @@ registry_tlv_serialize_status_t registry_deserialize(registry_t* registry,
             return REGISTRY_TLV_SERIALIZE_STATUS_INVALID_INPUT;
         }
 
+        // Duplicate path, which is used by all the branches (and the non-existing else does not
+        // mind if this not copied). This saves a few dozen of bytes of code.
+        registry_path_t curr_path = *path;
+
         if (til.type == TYPE_OBJECT_INSTANCE) {
             /* now we need to look for resources under this object instance and move their contents into registry.
              * 'operation' will dictate if we rewrite the whole tree (PUT) or just update individual values (POST)
              */
-            registry_path_t curr_path = *path;
             curr_path.object_instance_id = til.id;
             curr_path.path_type = REGISTRY_PATH_OBJECT_INSTANCE;
             if (operation == REGISTRY_OPERATION_REPLACE) {
@@ -952,7 +1201,6 @@ registry_tlv_serialize_status_t registry_deserialize(registry_t* registry,
             status = registry_deserialize_resources(registry, &curr_path, tlv + til.offset, til.length, operation);
 
         } else if (til.type == TYPE_RESOURCE) {
-            registry_path_t curr_path = *path;
             curr_path.resource_id = til.id;
             curr_path.path_type = REGISTRY_PATH_RESOURCE;
             if (operation == REGISTRY_OPERATION_REPLACE) {
@@ -966,12 +1214,10 @@ registry_tlv_serialize_status_t registry_deserialize(registry_t* registry,
             status = registry_deserialize_resource_tlv(registry, &curr_path, &til, operation);
 
         } else if (til.type == TYPE_RESOURCE_INSTANCE) {
-            registry_path_t curr_path = *path;
             curr_path.resource_instance_id = til.id;
             curr_path.path_type = REGISTRY_PATH_RESOURCE_INSTANCE;
             status = registry_deserialize_resource_tlv(registry, &curr_path, &til, operation);
         } else if (til.type == TYPE_MULTIPLE_RESOURCE) {
-            registry_path_t curr_path = *path;
             curr_path.path_type = REGISTRY_PATH_RESOURCE;
             curr_path.resource_id = til.id;
             status = registry_deserialize_resource_instances(registry, &curr_path, tlv + til.offset, til.length, operation);
@@ -982,7 +1228,7 @@ registry_tlv_serialize_status_t registry_deserialize(registry_t* registry,
     return status;
 }
 
-registry_tlv_serialize_status_t registry_deserialize_resources(registry_t* registry,
+static registry_tlv_serialize_status_t registry_deserialize_resources(registry_t* registry,
                                                                const registry_path_t* path,
                                                                const uint8_t* tlv,
                                                                uint32_t tlv_size,
@@ -1021,7 +1267,7 @@ registry_tlv_serialize_status_t registry_deserialize_resources(registry_t* regis
     return status;
 }
 
-registry_tlv_serialize_status_t registry_deserialize_resource(registry_t* registry,
+static registry_tlv_serialize_status_t registry_deserialize_resource(registry_t* registry,
                                                               const registry_path_t* path,
                                                               const uint8_t* tlv,
                                                               uint32_t tlv_size,
@@ -1040,7 +1286,7 @@ registry_tlv_serialize_status_t registry_deserialize_resource(registry_t* regist
     return registry_deserialize_resource_tlv(registry, path, &til, operation);
 }
 
-registry_tlv_serialize_status_t registry_deserialize_resource_tlv(registry_t* registry,
+static registry_tlv_serialize_status_t registry_deserialize_resource_tlv(registry_t* registry,
                                                               const registry_path_t* path,
                                                               registry_tlv_t* til,
                                                               registry_tlv_serialize_operation_t operation)
@@ -1155,7 +1401,7 @@ registry_tlv_serialize_status_t registry_deserialize_resource_tlv(registry_t* re
     return status;
 }
 
-registry_tlv_serialize_status_t registry_deserialize_resource_instances(registry_t* registry,
+static registry_tlv_serialize_status_t registry_deserialize_resource_instances(registry_t* registry,
                                                                         const registry_path_t* path,
                                                                         const uint8_t* tlv,
                                                                         uint32_t tlv_size,

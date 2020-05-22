@@ -43,11 +43,22 @@ static sn_coap_hdr_s* handle_delete_request(const registry_path_t* path, endpoin
 static sn_coap_hdr_s* handle_execute_request(const registry_path_t* path, endpoint_t *endpoint,
                                              sn_coap_hdr_s* received_coap_header,
                                              sn_nsdl_addr_s *address, int* execute_value_updated);
-
+#if MBED_CLIENT_ENABLE_OBSERVATION_PARAMETERS
 static sn_coap_msg_code_e read_attribute_value(const char *query, const char *query_end, uint32_t *int_value, float *float_value, bool *available);
+#endif
 
 static bool handle_coap_notification_response(registry_t* registry, sn_coap_hdr_s *received_coap_header, registry_notification_status_t notification_status);
 
+static sn_coap_hdr_s* handle_unsupported_request(endpoint_t *endpoint,
+                                                 sn_coap_hdr_s* received_coap_header)
+{
+    sn_coap_hdr_s *coap_response = sn_coap_build_response(endpoint->coap, received_coap_header, COAP_MSG_CODE_RESPONSE_CHANGED);
+    if (!coap_response) {
+        return NULL;
+    }
+    coap_response->msg_code = COAP_MSG_CODE_RESPONSE_BAD_REQUEST;
+    return coap_response;
+}
 
 static uint8_t parse_registry_path(const char* uri, registry_path_t* path)
 {
@@ -357,6 +368,7 @@ static sn_coap_hdr_s* handle_get_request(const registry_path_t* path, endpoint_t
 
 }
 
+#if MBED_CLIENT_ENABLE_OBSERVATION_PARAMETERS
 static sn_coap_msg_code_e read_attribute_value(const char *query, const char *query_end, uint32_t *int_value, float *float_value, bool *available)
 {
 
@@ -399,7 +411,6 @@ static sn_coap_msg_code_e read_attribute_value(const char *query, const char *qu
 
 }
 
-#if MBED_CLIENT_ENABLE_OBSERVATION_PARAMETERS
 sn_coap_msg_code_e read_observation_attributes(registry_t* registry, const registry_path_t* path, const char *query)
 {
 
@@ -692,9 +703,11 @@ static sn_coap_hdr_s* handle_put_request(const registry_path_t* path, endpoint_t
 
 }
 
+
 static sn_coap_hdr_s* handle_delete_request(const registry_path_t* path, endpoint_t *endpoint, sn_coap_hdr_s* received_coap_header)
 {
-
+// This feature is mandatory for bootstrap
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
     sn_coap_hdr_s * coap_response;
 
     tr_debug("handle_delete_request()");
@@ -729,8 +742,12 @@ static sn_coap_hdr_s* handle_delete_request(const registry_path_t* path, endpoin
     coap_response->msg_code = COAP_MSG_CODE_RESPONSE_DELETED;
 
     return coap_response;
-
+#else
+    (void)path;
+    return handle_unsupported_request(endpoint, received_coap_header);
+#endif //MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 }
+
 
 static sn_coap_hdr_s* handle_execute_request(const registry_path_t* path, endpoint_t *endpoint,
                                              sn_coap_hdr_s* received_coap_header,
@@ -800,7 +817,7 @@ static sn_coap_hdr_s* handle_create_request(registry_path_t* path, endpoint_t *e
                                             sn_coap_hdr_s* received_coap_header,
                                             sn_nsdl_addr_s *address, int* execute_value_updated)
 {
-
+#ifdef MBED_CLIENT_ENABLE_DYNAMIC_CREATION
     sn_coap_hdr_s * coap_response;
     registry_tlv_serialize_status_t status;
     char *object_path;
@@ -894,7 +911,10 @@ static sn_coap_hdr_s* handle_create_request(registry_path_t* path, endpoint_t *e
     }
 
     return coap_response;
-
+#else
+    (void)path;
+    return handle_unsupported_request(endpoint, received_coap_header);
+#endif //MBED_CLIENT_ENABLE_DYNAMIC_CREATION
 }
 
 static sn_coap_hdr_s* handle_post_request(registry_path_t* path, endpoint_t *endpoint,
@@ -908,9 +928,7 @@ static sn_coap_hdr_s* handle_post_request(registry_path_t* path, endpoint_t *end
         return handle_execute_request(path, endpoint, received_coap_header, address, execute_value_updated);
 
     } else if (path->path_type == REGISTRY_PATH_OBJECT || path->path_type == REGISTRY_PATH_OBJECT_INSTANCE) {
-
         return handle_create_request(path, endpoint, received_coap_header, address, execute_value_updated);
-
     }
 
     return NULL;
@@ -958,13 +976,10 @@ void handle_coap_request(endpoint_t *endpoint,
                 //TODO: block transfer...
             }
         } else if (COAP_MSG_CODE_REQUEST_DELETE == received_coap_header->msg_code) {
-
             coap_response = handle_delete_request(&regpath, endpoint, received_coap_header);
-
         }
 
     } else  {
-
         if (COAP_MSG_CODE_REQUEST_POST == received_coap_header->msg_code && !strcmp(resource_name, "bs")) {
             msg_code = COAP_MSG_CODE_RESPONSE_CHANGED;
             tr_info("handle_coap_request() Sending event ENDPOINT_EVENT_BOOTSTRAP_READY");

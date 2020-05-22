@@ -26,8 +26,6 @@
 #include MBED_CLOUD_CLIENT_USER_CONFIG_FILE
 #endif
 
-#define ACCOUNT_ID                          "account_id"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -36,52 +34,48 @@ extern "C" {
 // MBED_CLOUD_CLIENT_STORAGE_KEY_LIST_FILE defines the `cloud_client_param` type and the keys needed by cloud client.
 // It may also define additional application specific keys.
 #include MBED_CLOUD_CLIENT_STORAGE_KEY_LIST_FILE
-#else
+#else // not defined MBED_CLOUD_CLIENT_STORAGE_KEY_LIST_FILE
 
-typedef enum {
-    BOOTSTRAP_SERVER_PSK_IDENTITY = 1,
-    BOOTSTRAP_SERVER_PSK_SECRET = 2,
-    BOOTSTRAP_SERVER_URI = 3,
-    ROOT_OF_TRUST = 4,   // XXX: must match SOTP_TYPE_ROT in sotp.h used by bootloader
-    LWM2M_SERVER_PSK_IDENTITY = 5,
-    LWM2M_SERVER_PSK_SECRET = 6,
-    LWM2M_SERVER_URI = 7,
-    INTERNAL_ENDPOINT = 8,
-    ENDPOINT_NAME = 9,
-    UPDATE_PSK_IDENTITY = 10,
-    UPDATE_PSK_SECRET = 11,
-    KEY_VENDOR_ID = 12,
-    KEY_CLASS_ID = 13,
-    BOOTSTRAP_DEVICE_CERTIFICATE = 14,
-    BOOTSTRAP_SERVER_ROOT_CA_CERTIFICATE = 15,
-    BOOTSTRAP_DEVICE_PRIVATE_KEY = 16,
-    LWM2M_DEVICE_CERTIFICATE = 17,
-    LWM2M_SERVER_ROOT_CA_CERTIFICATE = 18,
-    LWM2M_DEVICE_PRIVATE_KEY = 19,
-    UPDATE_VENDOR_ID = 20,
-    UPDATE_CLASS_ID = 21,
-    UPDATE_FINGERPRINT = 22,
-    UPDATE_CERTIFICATE = 23,
-    SSL_SESSION_DATA = 24,
+// The supported storage keys
 
-#if defined(USE_EXTERNAL_USER_STORAGE_PARAMETERS)
-    USER_STORAGE_FIELD_0 = 25,
-    USER_STORAGE_FIELD_1 = 26,
-    USER_STORAGE_FIELD_2 = 27,
-    USER_STORAGE_FIELD_3 = 28,
-    USER_STORAGE_FIELD_4 = 29,
-    USER_STORAGE_FIELD_5 = 30,
-    USER_STORAGE_FIELD_6 = 31,
-    USER_STORAGE_FIELD_7 = 32,
-    USER_STORAGE_FIELD_8 = 33,
-#endif // USE_EXTERNAL_USER_STORAGE_PARAMETERS
+//TODO: this should be removed once mbed_cloud_client_get_rot_128bit() removed from CloudClientStorageCommon.cpp
+#define ROOT_OF_TRUST                           "ROOT_OF_TRUST" // "ROT"           /* not used, should be removed */
 
-    FOTA_ENCRYPT_KEY = 34,
-    FOTA_SALT_KEY = 35,
-    FOTA_MANIFEST_KEY = 36,
+#define INTERNAL_ENDPOINT                       "INTERNAL_ENDPOINT" // "IEP"
+#define ENDPOINT_NAME                           "pelion_wCfgParam_mbed.EndpointName" // "EP"            /* needed by factory client - value can't be modified */
+#define BOOTSTRAP_SERVER_PSK_IDENTITY           "BOOTSTRAP_SERVER_PSK_IDENTITY" // "BsPskId"
+#define BOOTSTRAP_SERVER_PSK_SECRET             "BOOTSTRAP_SERVER_PSK_SECRET" // "BsPskSc"
+#define BOOTSTRAP_SERVER_URI                    "pelion_wCfgParam_mbed.BootstrapServerURI" // "BsUri"
+#define BOOTSTRAP_SERVER_ROOT_CA_CERTIFICATE    "pelion_wCrtae_mbed.BootstrapServerCACert" // "BsCACert"
+#define BOOTSTRAP_DEVICE_CERTIFICATE            "pelion_wCrtae_mbed.BootstrapDeviceCert" // "BsDevCert"
+#define BOOTSTRAP_DEVICE_PRIVATE_KEY            "pelion_wPrvKey_mbed.BootstrapDevicePrivateKey" // "BsDevKey"
+#define LWM2M_SERVER_PSK_IDENTITY               "LWM2M_SERVER_PSK_IDENTITY" // "LwM2MPskId"
+#define LWM2M_SERVER_PSK_SECRET                 "LWM2M_SERVER_PSK_SECRET" // "LwM2MPskSc"
+#define LWM2M_SERVER_URI                        "pelion_wCfgParam_mbed.LwM2MServerURI" // "LwM2MUri"      /* needed by factory client - value can't be modified */
+#define LWM2M_SERVER_ROOT_CA_CERTIFICATE        "pelion_wCrtae_mbed.LwM2MServerCACert" // "LwM2MCACert"   /* needed by factory client - value can't be modified */
+#define LWM2M_DEVICE_CERTIFICATE                "pelion_wCrtae_mbed.LwM2MDeviceCert" // "DevCert"       /* needed by factory client - value can't be modified */
+#define LWM2M_DEVICE_PRIVATE_KEY                "pelion_wPrvKey_mbed.LwM2MDevicePrivateKey" // "DevKey"        /* needed by factory client - value can't be modified */
+#define UPDATE_PSK_IDENTITY                     "UPDATE_PSK_IDENTITY"
+#define UPDATE_PSK_SECRET                       "UPDATE_PSK_SECRET"
+#define KEY_VENDOR_ID                           "KEY_VENDOR_ID"
+#define KEY_CLASS_ID                            "KEY_CLASS_ID"
 
-} cloud_client_param;
-#endif
+#define UPDATE_VENDOR_ID                        "pelion_wCfgParam_mbed.VendorId" // "FWVendorId"
+#define UPDATE_CLASS_ID                         "pelion_wCfgParam_mbed.ClassId" // "FWClassId"
+#define UPDATE_FINGERPRINT                      "UPDATE_FINGERPRINT" // "FWFngrprnt"
+#define UPDATE_CERTIFICATE                      "pelion_wCrtae_mbed.UpdateAuthCert" // "FWUpdateCert"
+
+#define SSL_SESSION_DATA                        "SSL_SESSION_DATA" // "SslSessionDt"
+
+#define FOTA_ENCRYPT_KEY                        "FOTA_ENCRYPT_KEY" // "FTEncryptKey"
+#define FOTA_SALT_KEY                           "FOTA_SALT_KEY" // ""FTSaltKey"
+#define FOTA_MANIFEST_KEY                       "FOTA_MANIFEST_KEY" // ""FTManKey"
+#define FOTA_COMP_VER_BASE                      "FTCmpV"
+
+// The data type used by cloud client for the key
+typedef const char * cloud_client_param;
+
+#endif // MBED_CLOUD_CLIENT_STORAGE_KEY_LIST_FILE
 
 typedef enum {
     CCS_STATUS_SUCCESS = 0,
@@ -112,6 +106,17 @@ ccs_status_e initialize_storage(void);
 *  \return CCS_STATUS_SUCCESS if success, else error code (mapped from SOTP)
 */
 ccs_status_e get_config_parameter(cloud_client_param key, uint8_t *buffer, const size_t buffer_size, size_t *value_length);
+
+/**
+*  \brief Gets pointer to the stored value for the given key. Note: this is not available
+*  on all implementations and the user may not modify or free the returned buffer.
+*  \param key, Key of stored item.
+*  \param [in] buffer_size, Length of input buffer in bytes.
+*  \param [in] buffer, Buffer to store data on (must be aligned to a 32 bit boundary).
+*  \param [out] value_length, Actual length of returned data
+*  \return CCS_STATUS_SUCCESS if success, else error code (mapped from SOTP)
+*/
+ccs_status_e get_config_parameter_no_copy(cloud_client_param key, const uint8_t **buffer, size_t *value_length);
 
 /**
 *  \brief Programs one item of data on storage, given type.

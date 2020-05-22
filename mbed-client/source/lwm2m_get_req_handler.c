@@ -193,9 +193,9 @@ void get_handler_send_message(endpoint_t *endpoint)
         // Message is successfully sent, no need for resend.
         data_request->resend = false;
     } else if (endpoint_status == ENDPOINT_STATUS_ERROR_MEMORY_FAILED) {
-        lwm2m_free(data_request);
         data_request->on_get_data_error_cb(FAILED_TO_ALLOCATE_MEMORY, data_request->context);
         ns_list_remove(&get_request_list, data_request);
+        lwm2m_free(data_request);
         send_queue_sent(endpoint, true);
     }
 

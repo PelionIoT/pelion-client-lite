@@ -23,6 +23,7 @@
 #include "shared_rng.h"
 #endif
 
+#include <assert.h>
 #include <string.h>
 
 #define TRACE_GROUP "Conn"
@@ -39,6 +40,7 @@ static void protoman_event_handler(protoman_id_t protoman_id, protoman_layer_id_
             ((connection_t*)connection)->event_handler(CONNECTION_EVENT_DATA, ((connection_t*)connection)->context, 0);
             break;
 
+        case PROTOMAN_EVENT_RESUMED:
         case PROTOMAN_EVENT_CONNECTED:
             ((connection_t*)connection)->event_handler(CONNECTION_EVENT_CONNECTED, ((connection_t*)connection)->context, 0);
             break;
@@ -61,6 +63,8 @@ static void protoman_event_handler(protoman_id_t protoman_id, protoman_layer_id_
             /* Protoman state has changed, note that connected and disconnected use their own IDs */
         case PROTOMAN_EVENT_INITIALIZED:
             /* Protoman initialized. */
+        case PROTOMAN_EVENT_PAUSED:
+            /* Protoman paused its layers. */
             break;
 
         case PROTOMAN_EVENT_DATA_WRITTEN:
@@ -70,7 +74,6 @@ static void protoman_event_handler(protoman_id_t protoman_id, protoman_layer_id_
         default:
             tr_warn("protoman_event_handler - protoman event not handled, id: %s (%d)", protoman_strevent(event_id), event_id);
             break;
-
     }
 }
 
@@ -148,6 +151,21 @@ int8_t connection_init(connection_t *connection, void(*event_handler)(connection
 #endif // #ifndef PROTOMAN_OFFLOAD_TLS
     }
 
+#ifdef PROTOMAN_ENABLE_PCAP
+    const int snap_len = PROTOMAN_MTU * 2;
+    const char* pcap_path = "/tmp/protoman.pcap";
+
+    tr_debug("Setting up pcap, snaplen: %d, cap-file: %s", snap_len, pcap_path);
+
+    memset(&connection->protoman_layer_pcap, 0, sizeof(struct protoman_layer_pcap_s));
+
+    connection->protoman_layer_pcap.pcap_snaplen = snap_len;
+    connection->protoman_layer_pcap.config.pcap_file_path = pcap_path;
+
+    protoman_add_layer_pcap(&connection->protoman, &connection->protoman_layer_pcap.layer);
+#endif // PROTOMAN_ENABLE_PCAP
+
+
     // Add connectivity layers to protoman
     return connection_protoman_layers_init(connection, hostname, port, interface
 #ifdef PROTOMAN_OFFLOAD_TLS
@@ -177,6 +195,16 @@ void connection_start(connection_t *connection)
 void connection_stop(connection_t *connection)
 {
     protoman_disconnect(&connection->protoman);
+}
+
+void connection_pause(connection_t *connection)
+{
+    protoman_pause(&connection->protoman);
+}
+
+void connection_resume(connection_t *connection)
+{
+    protoman_resume(&connection->protoman);
 }
 
 

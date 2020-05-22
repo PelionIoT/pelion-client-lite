@@ -166,6 +166,10 @@
 #define MBED_CLIENT_REGISTRY_OBJECT_COUNT 0
 #endif
 
+#ifdef MBED_CONF_MBED_CLIENT_SET_LIFETIME_AS_DEFAULT_MAX_AGE
+#define MBED_CLIENT_SET_LIFETIME_AS_DEFAULT_MAX_AGE MBED_CONF_MBED_CLIENT_SET_LIFETIME_AS_DEFAULT_MAX_AGE
+#endif
+
 // This is valid for mbed-client-mbedtls
 // For other SSL implementation there
 // can be other

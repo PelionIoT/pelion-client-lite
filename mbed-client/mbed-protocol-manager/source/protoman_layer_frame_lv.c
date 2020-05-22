@@ -43,7 +43,9 @@ static const struct protoman_layer_callbacks_s callbacks = {
     NULL,
     &_do_read,
     &_do_write,
-    &_do_disconnect
+    &_do_disconnect,
+    NULL,
+    NULL
 };
 
 struct layer_context_s {

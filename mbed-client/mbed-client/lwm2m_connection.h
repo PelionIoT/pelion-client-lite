@@ -22,6 +22,10 @@
 #include "protoman_layer_mbedtls.h"
 #include "connection_protoman_layers.h"
 
+#ifdef PROTOMAN_ENABLE_PCAP
+#include "protoman_layer_pcap.h"
+#endif // PROTOMAN_ENABLE_PCAP
+
 #ifdef MBED_CLOUD_CLIENT_USER_CONFIG_FILE
 #include MBED_CLOUD_CLIENT_USER_CONFIG_FILE
 #else
@@ -74,6 +78,10 @@ typedef struct connection_s {
 #error "Select Certificate or PSK mode"
 #endif // PROTOMAN_SECURITY_ENABLE_CERTIFICATE || PROTOMAN_SECURITY_ENABLE_PSK
 #endif // PROTOMAN_OFFLOAD_TLS
+
+#ifdef PROTOMAN_ENABLE_PCAP
+    struct protoman_layer_pcap_s protoman_layer_pcap;
+#endif // PROTOMAN_ENABLE_PCAP
 
     connection_protoman_layers_t protoman_layers; ///< Structure for connectivity layers.
 
@@ -164,6 +172,10 @@ void connection_start(connection_t *connection);
  * \param connection Pointer to the connection to be closed.
  */
 void connection_stop(connection_t *connection);
+
+void connection_pause(connection_t *connection);
+void connection_resume(connection_t *connection);
+
 
 /**
  * \brief Send data using a connection.

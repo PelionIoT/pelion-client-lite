@@ -40,6 +40,14 @@ const char *protoman_strstate(int state_id)
             return "PROTOMAN_STATE_ERRORING";
         case PROTOMAN_STATE_ERRORED:
             return "PROTOMAN_STATE_ERRORED";
+        case PROTOMAN_STATE_PAUSING:
+            return "PROTOMAN_STATE_PAUSING";
+        case PROTOMAN_STATE_PAUSED:
+            return "PROTOMAN_STATE_PAUSED";
+        case PROTOMAN_STATE_RESUMING:
+            return "PROTOMAN_STATE_RESUMING";
+        case PROTOMAN_STATE_RESUMED:
+            return "PROTOMAN_STATE_RESUMED";
         default:
             return "UNKNOWN";
     }
@@ -118,6 +126,8 @@ const char *protoman_strerror(int err_code)
             return "PROTOMAN_ERR_NETWORK_ERROR";
         case PROTOMAN_ERR_TOO_BIG_PACKET:
             return "PROTOMAN_ERR_TOO_BIG_PACKET";
+        case PROTOMAN_ERR_NOSOCKET:
+            return "PROTOMAN_ERR_NOSOCKET";
         case PROTOMAN_ERR_NOT_IMPLEMENTED:
             return "PROTOMAN_ERR_NOT_IMPLEMENTED";
         default:
@@ -146,6 +156,10 @@ const char *protoman_strevent(uint8_t event_id)
             return "PROTOMAN_EVENT_DISCONNECTED";
         case PROTOMAN_EVENT_ERROR:
             return "PROTOMAN_EVENT_ERROR";
+        case PROTOMAN_EVENT_PAUSED:
+            return "PROTOMAN_EVENT_PAUSED";
+        case PROTOMAN_EVENT_RESUMED:
+            return "PROTOMAN_EVENT_RESUMED";
         default:
             return "UNKNOWN";
     }
