@@ -323,6 +323,7 @@ fail:
 
 int fota_source_add_component(unsigned int comp_id, const char *name, const char *sem_ver)
 {
+#if !FOTA_SOURCE_COMPONENT_BACKWARD_COMPATIBILITY_MODE
     registry_path_t path;
 
     // Create Component Identity resource /14/<comp_id>/0
@@ -342,7 +343,7 @@ int fota_source_add_component(unsigned int comp_id, const char *name, const char
             REGISTRY_STATUS_OK != registry_set_resource_value_to_reg_msg(registry, &path, true)) {
         return FOTA_STATUS_INTERNAL_ERROR;
     }
-
+#endif
     return FOTA_STATUS_SUCCESS;
 }
 

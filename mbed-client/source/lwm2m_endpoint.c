@@ -41,7 +41,7 @@
 
 #define TRACE_GROUP "lwEP"
 
-static const char MCC_VERSION[] = "mccv=1.1.0-lite";
+static const char MCC_VERSION[] = "mccv=1.1.1-lite";
 
 static const char ep_name_parameter[]  = "ep="; /* Endpoint name. A unique name for the registering node in a domain.  */
 static const uint8_t resource_path[] = {'r', 'd'}; /* For resource directory */
