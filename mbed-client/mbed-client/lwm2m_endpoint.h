@@ -22,6 +22,7 @@
 #include "lwm2m_notifier.h"
 #include "lwm2m_send_queue.h"
 #include "eventOS_event.h"
+#include "protoman.h"
 
 /** \file lwm2m_endpoint.h
  *  \brief Client Lite internal LwM2M and Device Management endpoint logic API.
@@ -93,14 +94,20 @@ typedef struct endpoint_confirmable_response_s {
 
 } endpoint_confirmable_response_t;
 
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+typedef struct object_handler_s object_handler_t;
+#endif
+
 /**
  *  \brief Main data structure for Client Lite LwM2M endpoint.
  */
 typedef struct endpoint_s {
 
     send_queue_t send_queue; ///< Data allocated for send queue.
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     registry_t registry; ///< Data allocated for registry.
     notifier_t notifier; ///< Data allocated for notifier.
+#endif
     endpoint_confirmable_response_t confirmable_response; ///< Data allocated for storing a response.
     struct connection_s *connection; ///< Pointer to connection.
     struct coap_s *coap; ///< Pointer to the CoAP library.
@@ -125,8 +132,49 @@ typedef struct endpoint_s {
     bool coap_ping_request:1; ///< CoAP ping request is pending.
 #endif
 
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    object_handler_t *object_handlers; //Object owners
+#if MBED_CLIENT_ENABLE_AUTO_OBSERVATION
+    uint16_t auto_obs_token; ///< For internal use only, MUST NOT be accessed from application.
+#endif
+    uint32_t lifetime;
+    uint8_t security_mode;
+    char *server_uri;
+#endif
+
 } endpoint_t;
 
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+typedef struct register_resource_s register_resource_t;
+
+struct register_resource_s {
+    const char *full_res_id; // in form "/1/0/1" - the buffer pointed to must exist for the lifetime of the struct instance
+    uint16_t aobs_id;
+
+#if MBED_CLIENT_ENABLE_PUBLISH_RESOURCE_VALUE_IN_REG_MSG
+    uint8_t *value; //NOTE: Use lwm2m_alloc!
+    uint16_t value_len;
+#endif
+    register_resource_t *next;
+};
+
+// Allocate and populate list of resources. Ownership will be transferred to caller, who must free the resources when done.
+typedef int (get_resources_cb)(endpoint_t *endpoint, register_resource_t **resources);
+typedef sn_coap_hdr_s *(coap_req_cb)(const registry_path_t* path,
+                                     endpoint_t *endpoint,
+                                     const sn_coap_hdr_s *request,
+                                     sn_nsdl_addr_s *src_addr,
+                                     sn_coap_hdr_s *response,
+                                     int *acked);
+
+struct object_handler_s {
+    uint16_t object_id;
+    get_resources_cb *res_cb;
+    coap_req_cb *req_cb;
+    registry_callback_t obj_cb;
+    object_handler_t *next;
+};
+#endif
 
 /**
  * \brief Initialize the endpoint structure.
@@ -373,6 +421,55 @@ void endpoint_start_coap_exec_timer(endpoint_t *endpoint);
 
 #if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
 void endpoint_send_coap_ping(endpoint_t *endpoint);
+#endif
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+/**
+ * @brief Register object handler
+ *
+ *  Register object handlers allocated with `endpoint_allocate_object_handler`.
+ *
+ * \note When registering multiple handlers from a single source they can be passed in as a list,
+ *       and in this case only one needs to set the res_cb pointer. One res_cb instance
+ *       can iterate through all needed resources.
+ *
+ * @param endpoint Pointer to the endpoint.
+ * @param owner A list of objects owned. Ownership is transferred.
+ */
+void endpoint_register_object_handler(endpoint_t *endpoint, object_handler_t *handler);
+
+void endpoint_remove_object_handler(endpoint_t *endpoint, uint16_t object_id);
+
+/**
+ * @brief Allocate object handler
+ *
+ * @param object_id ID of the object.
+ * @param res_cb Resource list getter callback.
+ * @param req_cb Coap request handler callback.
+ * @param obj_cb Object callback.
+ * @return pointer to object_handler or NULL if no memory
+ */
+object_handler_t *endpoint_allocate_object_handler(uint16_t object_id, get_resources_cb *res_cb,
+                                                   coap_req_cb *req_cb, registry_callback_t obj_cb);
+
+register_resource_t *endpoint_create_register_resource_str(endpoint_t *endpoint, const char *id,
+                                                           bool auto_obs, const uint8_t *value,
+                                                           uint16_t len);
+
+register_resource_t *endpoint_create_register_resource_int(endpoint_t *endpoint, const char *id,
+                                                           bool auto_obs, int64_t val);
+
+register_resource_t *endpoint_create_register_resource_opaque(endpoint_t *endpoint, const char *id,
+                                                              bool auto_obs, const uint8_t *value,
+                                                              uint16_t len);
+
+register_resource_t *endpoint_create_register_resource(endpoint_t *endpoint, const char *id,
+                                                       bool auto_obs);
+
+coap_req_cb *endpoint_get_coap_request_callback(endpoint_t *endpoint, uint16_t object_id);
+
+registry_callback_t endpoint_get_object_callback(endpoint_t *endpoint, uint16_t object_id);
+
 #endif
 
 #ifdef __cplusplus

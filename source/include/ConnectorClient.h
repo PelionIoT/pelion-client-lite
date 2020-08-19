@@ -117,10 +117,27 @@ public:
     bool connector_credentials_available();
 
     /**
-    * \brief Returns pointer to the ConnectorClientEndpointInfo object.
-    * \return ConnectorClientEndpointInfo pointer.
-    */
+     * \brief Get information on a connected endpoint.
+     * \param endpoint_info Populated with the endpoint information on a successfull call.
+     * \return True in success, false in failure.
+     */
     bool endpoint_info(ConnectorClientEndpointInfo *endpoint_info);
+
+    /**
+    * \brief Get endpoint name.
+    * \param endpoint_name Output buffer that on a succesful call will contain the endpoint name as a C string.
+    * \param size The size of the `endpoint_name` buffer. Any data that doesn't fit will be discarded.
+    * \return True in success, false in failure.
+    */
+    bool get_endpoint_name(char *endpoint_name, size_t size);
+
+    /**
+    * \brief Get device id of a connected device.
+    * \param device_id Output buffer that on a succesful call will contain the device id as a C string.
+    * \param size The size of the `device_id` buffer. Any data that doesn't fit will be discarded.
+    * \return True in success, false in failure.
+    */
+    bool get_device_id(char *device_id, size_t size);
 
 public:
     // implementation of M2MInterfaceObserver:

@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -16,32 +16,18 @@
 // limitations under the License.
 // ----------------------------------------------------------------------------
 
-#ifndef __FOTA_MANIFEST_DEFS_H_
-#define __FOTA_MANIFEST_DEFS_H_
+#ifndef __FOTA_CRYPTO_ASN_EXTRA_H_
+#define __FOTA_CRYPTO_ASN_EXTRA_H_
 
-#include "fota/fota_base.h"
+#include <stdint.h>
 
-#ifndef FOTA_MANIFEST_SCHEMA_VERSION
-#define FOTA_MANIFEST_SCHEMA_VERSION        3
-#endif
+#define MBEDTLS_ASN1_ENUMERATED              0x0A
 
-#ifndef FOTA_MANIFEST_URI_SIZE
-#define FOTA_MANIFEST_URI_SIZE            256
-#endif
+int mbedtls_asn1_get_enumerated_value(unsigned char **p,
+                                      const unsigned char *end,
+                                      int *val);
+int mbedtls_asn1_get_int64(unsigned char **p,
+                           const unsigned char *end,
+                           int64_t *val);
 
-#ifndef FOTA_MANIFEST_VENDOR_DATA_SIZE
-#define FOTA_MANIFEST_VENDOR_DATA_SIZE    128
-#endif
-
-#define FOTA_MANIFEST_PAYLOAD_FORMAT_RAW    1
-#define FOTA_MANIFEST_PAYLOAD_FORMAT_DELTA  5
-
-#ifndef FOTA_MANIFEST_MAX_SIZE
-#define FOTA_MANIFEST_MAX_SIZE           512
-#endif
-
-#ifndef FOTA_CERT_MAX_SIZE
-#define FOTA_CERT_MAX_SIZE 600
-#endif
-
-#endif // __FOTA_MANIFEST_DEFS_H_
+#endif  // __FOTA_CRYPTO_ASN_EXTRA_H_

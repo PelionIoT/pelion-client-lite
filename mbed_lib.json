@@ -28,6 +28,12 @@
             "macro_name": "MBED_CONF_CLOUD_CLIENT_USE_SOFT_PAUSE_RESUME",
             "accepted_values": [true, null],
             "value": null
+        },
+        "disable-est": {
+            "help": "Disable EST functionality and all its requirements",
+            "accepted_values": [true, false],
+            "value": true,
+            "macro_name": "MBED_CLIENT_DISABLE_EST_FEATURE"
         }
     },
     "macros" : [

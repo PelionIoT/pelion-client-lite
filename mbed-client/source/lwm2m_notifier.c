@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+
 #include "lwm2m_constants.h"
 #include "lwm2m_endpoint.h"
 #include "lwm2m_heap.h"
@@ -270,7 +272,7 @@ static uint8_t notifier_check_lt_gt_st(registry_observation_parameters_t *parame
 
 #if MBED_CLIENT_ENABLE_OBSERVATION_PARAMETERS
 
-    if (!parameters->available.gt && !parameters->available.lt && !parameters->available.st) {
+    if ((!parameters->available.gt && !parameters->available.lt && !parameters->available.st) || !parameters->available.previous_value) {
         return 1;
     }
 
@@ -281,23 +283,16 @@ static uint8_t notifier_check_lt_gt_st(registry_observation_parameters_t *parame
     if (value->type == NOTIFIER_OBSERVATION_VALUE_TYPE_INT) {
 #endif
 
-        if (parameters->available.gt && value->value.int_value > parameters->gt) {
-            return 1;
-        }
-
         //Report if crossing threshold
         if ((parameters->available.gt && parameters->available.previous_value) &&
-                (parameters->previous_value.int_value > parameters->gt && value->value.int_value <= parameters->gt)) {
+                ((parameters->previous_value.int_value > parameters->gt && value->value.int_value <= parameters->gt) ||
+                (parameters->previous_value.int_value <= parameters->gt && value->value.int_value > parameters->gt))) {
             return 1;
         }
 
-        if (parameters->available.lt && value->value.int_value < parameters->lt) {
-            return 1;
-        }
-
-        //Report if crossing threshold
         if ((parameters->available.lt && parameters->available.previous_value) &&
-                (parameters->previous_value.int_value < parameters->lt && value->value.int_value >= parameters->lt)) {
+                ((parameters->previous_value.int_value < parameters->lt && value->value.int_value >= parameters->lt) ||
+                (parameters->previous_value.int_value >= parameters->lt && value->value.int_value < parameters->lt))) {
             return 1;
         }
 
@@ -307,29 +302,22 @@ static uint8_t notifier_check_lt_gt_st(registry_observation_parameters_t *parame
 #if MBED_CLIENT_ENABLE_FLOAT_VALUE
     } else {
 
-            if (parameters->available.gt && value->value.float_value > parameters->gt) {
-                return 1;
-            }
+        //Report if crossing threshold
+        if ((parameters->available.gt && parameters->available.previous_value) &&
+                ((parameters->previous_value.float_value > parameters->gt && value->value.float_value <= parameters->gt) ||
+                (parameters->previous_value.float_value <= parameters->gt && value->value.float_value > parameters->gt))) {
+            return 1;
+        }
 
-            //Report if crossing threshold
-            if ((parameters->available.gt && parameters->available.previous_value) &&
-                    (parameters->previous_value.float_value > parameters->gt && value->value.float_value <= parameters->gt)) {
-                return 1;
-            }
+        if ((parameters->available.lt && parameters->available.previous_value) &&
+                ((parameters->previous_value.float_value < parameters->lt && value->value.float_value >= parameters->lt) ||
+                (parameters->previous_value.float_value >= parameters->lt && value->value.float_value < parameters->lt))) {
+            return 1;
+        }
 
-            if (parameters->available.lt && value->value.float_value < parameters->lt) {
-                return 1;
-            }
-
-            //Report if crossing threshold
-            if ((parameters->available.lt && parameters->available.previous_value) &&
-                    (parameters->previous_value.float_value < parameters->lt && value->value.float_value >= parameters->lt)) {
-                return 1;
-            }
-
-            if (parameters->available.st && parameters->available.previous_value && fabsf((parameters->previous_value.float_value - value->value.float_value)) >= parameters->st) {
-                return 1;
-            }
+        if (parameters->available.st && parameters->available.previous_value && fabsf((parameters->previous_value.float_value - value->value.float_value)) >= parameters->st) {
+            return 1;
+        }
 
     }
 #endif
@@ -1285,5 +1273,4 @@ void notifier_clear_notifications(notifier_t *notifier)
     }
 }
 
-
-
+#endif // !defined(MBED_CLOUD_CLIENT_DISABLE_REGISTRY)

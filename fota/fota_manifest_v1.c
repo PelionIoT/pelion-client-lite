@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -19,6 +19,8 @@
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
 
+#define TRACE_GROUP "FOTA"
+
 #include <stddef.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -27,6 +29,7 @@
 #include "fota/fota_status.h"
 #include "fota/fota_manifest.h"
 #include "fota/fota_crypto.h"
+#include "fota/fota_crypto_asn_extra.h"
 #include "fota/fota_nvm.h"
 #include "mbedtls/asn1.h"
 #include "mbedtls/sha256.h"
@@ -64,7 +67,7 @@
  *     installedDigest OCTET STRING OPTIONAL,
  *     version     UTF8String OPTIONAL
  * }
- * 
+ *
  */
 int parse_delta_metadata(
     const uint8_t *metadata, size_t metadata_size,
@@ -126,7 +129,7 @@ int parse_delta_metadata(
  *     installedDigest OCTET STRING OPTIONAL,
  *     version     UTF8String OPTIONAL
  * }
- * 
+ *
  */
 int parse_payload_description(
     const uint8_t *desc_data, size_t desc_size,
@@ -147,7 +150,7 @@ int parse_payload_description(
         FOTA_TRACE_ERROR("Error reading PayloadDescription:format %d", tls_status);
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
-    
+
     FOTA_MANIFEST_TRACE_DEBUG("PayloadDescription:format %d", payload_format_value);
     fw_info->payload_format = payload_format_value;
     if (payload_format_value == FOTA_MANIFEST_PAYLOAD_FORMAT_DELTA) {
@@ -313,6 +316,7 @@ int parse_manifest_internal(
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
 
+#if !defined(FOTA_TEST_MANIFEST_BYPASS_VALIDATION)
     uint8_t fota_id[FOTA_GUID_SIZE] = {0};
     fota_status = fota_nvm_get_vendor_id(fota_id);
     if (fota_status != FOTA_STATUS_SUCCESS) {
@@ -323,7 +327,8 @@ int parse_manifest_internal(
         FOTA_TRACE_ERROR("vendor_id mismatch");
         return FOTA_STATUS_MANIFEST_WRONG_VENDOR_ID;
     }
-    
+#endif  // !defined(FOTA_TEST_MANIFEST_BYPASS_VALIDATION)
+
     p += len;
 
     FOTA_MANIFEST_TRACE_DEBUG("Reading Manifest:classId @%d",  p - input_data);
@@ -335,6 +340,7 @@ int parse_manifest_internal(
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
 
+#if !defined(FOTA_TEST_MANIFEST_BYPASS_VALIDATION)
     memset(fota_id, 0, FOTA_GUID_SIZE);
     fota_status = fota_nvm_get_class_id(fota_id);
     if (fota_status != FOTA_STATUS_SUCCESS) {
@@ -346,6 +352,7 @@ int parse_manifest_internal(
         FOTA_TRACE_ERROR("class_id mismatch");
         return FOTA_STATUS_MANIFEST_WRONG_CLASS_ID;
     }
+#endif  // !defined(FOTA_TEST_MANIFEST_BYPASS_VALIDATION)
     p += len;
 
     FOTA_MANIFEST_TRACE_DEBUG("Reading Manifest:deviceId @%d",  p - input_data);
@@ -489,8 +496,7 @@ int parse_manifest_internal(
  */
 int fota_manifest_parse(
     const uint8_t *input_data, size_t input_size,
-    manifest_firmware_info_t *fw_info,
-    mbedtls_x509_crt *cert
+    manifest_firmware_info_t *fw_info
 )
 {
     FOTA_DBG_ASSERT(input_data);
@@ -498,9 +504,9 @@ int fota_manifest_parse(
     FOTA_DBG_ASSERT(fw_info);
 
     memset(fw_info, 0, sizeof(*fw_info));
-
-    int fota_status = FOTA_STATUS_MANIFEST_MALFORMED;
-    int tls_status;
+    int ret = FOTA_STATUS_MANIFEST_MALFORMED;  // used by FOTA_FI_SAFE_COND
+    int fota_sig_status = FOTA_STATUS_MANIFEST_MALFORMED;  // must be set to error
+    int tmp_status;  // reusable status
     size_t len = input_size;
 
     unsigned char *signed_data_ptr = 0;
@@ -515,11 +521,11 @@ int fota_manifest_parse(
     int resource_type = -1;
 
     FOTA_MANIFEST_TRACE_DEBUG("SignedResource @%d", (p - input_data));
-    tls_status = mbedtls_asn1_get_tag(
+    tmp_status = mbedtls_asn1_get_tag(
                      &p, resource_end, &len,
                      MBEDTLS_ASN1_CONSTRUCTED | MBEDTLS_ASN1_SEQUENCE);
-    if (tls_status != 0) {
-        FOTA_TRACE_ERROR("Error reading SignedResource tag %d", tls_status);
+    if (tmp_status != 0) {
+        FOTA_TRACE_ERROR("Error reading SignedResource tag %d", tmp_status);
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
     if (p + len > resource_end) {
@@ -533,11 +539,11 @@ int fota_manifest_parse(
     signed_data_ptr = p;
 
     FOTA_MANIFEST_TRACE_DEBUG("Reading Resource @%d", (p - input_data));
-    tls_status = mbedtls_asn1_get_tag(
+    tmp_status = mbedtls_asn1_get_tag(
                      &p, resource_end, &len,
                      MBEDTLS_ASN1_CONSTRUCTED | MBEDTLS_ASN1_SEQUENCE);
-    if (tls_status != 0) {
-        FOTA_TRACE_ERROR("Error reading Resource %d", tls_status);
+    if (tmp_status != 0) {
+        FOTA_TRACE_ERROR("Error reading Resource %d", tmp_status);
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
 
@@ -550,55 +556,57 @@ int fota_manifest_parse(
     p += len;  // jump over resource element
 
     FOTA_MANIFEST_TRACE_DEBUG("Reading ResourceSignature @%d", (p - input_data));
-    tls_status = mbedtls_asn1_get_tag(
+    tmp_status = mbedtls_asn1_get_tag(
                      &p, resource_end, &len,
                      MBEDTLS_ASN1_CONSTRUCTED | MBEDTLS_ASN1_SEQUENCE);
-    if (tls_status != 0) {
-        FOTA_TRACE_ERROR("Error reading ResourceSignature %d", tls_status);
+    if (tmp_status != 0) {
+        FOTA_TRACE_ERROR("Error reading ResourceSignature %d", tmp_status);
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
 
     FOTA_DBG_ASSERT(resource_end >= p + len);
 
     FOTA_MANIFEST_TRACE_DEBUG("Reading ResourceSignature:hash @%d", (p - input_data));
-    tls_status = mbedtls_asn1_get_tag(
+    tmp_status = mbedtls_asn1_get_tag(
                      &p, resource_end, &len,
                      MBEDTLS_ASN1_OCTET_STRING);
-    if (tls_status != 0) {
-        FOTA_TRACE_ERROR("Error reading hash %d", tls_status);
+    if (tmp_status != 0) {
+        FOTA_TRACE_ERROR("Error reading hash %d", tmp_status);
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
 
     p += len;  // jump over hash element
 
     FOTA_MANIFEST_TRACE_DEBUG("Reading ResourceSignature:signatures @%d", (p - input_data));
-    tls_status = mbedtls_asn1_get_sequence_of(
+    tmp_status = mbedtls_asn1_get_sequence_of(
                      &p, resource_end, cur_ptr,
                      MBEDTLS_ASN1_CONSTRUCTED | MBEDTLS_ASN1_SEQUENCE);
-    if (tls_status != 0) {
-        FOTA_TRACE_ERROR("Error reading ResourceSignature:signatures %d", tls_status);
+    if (tmp_status != 0) {
+        FOTA_TRACE_ERROR("Error reading ResourceSignature:signatures %d", tmp_status);
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
-    
+
     FOTA_MANIFEST_TRACE_DEBUG("Reading ResourceSignature:signatures[0] @%d", (p - input_data));
-    tls_status = mbedtls_asn1_get_tag(
+    tmp_status = mbedtls_asn1_get_tag(
                      &(cur_ptr->buf.p), resource_end, &len,
                      MBEDTLS_ASN1_OCTET_STRING);
-    if (tls_status != 0) {
-        FOTA_TRACE_ERROR("Error reading ResourceSignature:signatures[0] %d", tls_status);
+    if (tmp_status != 0) {
+        FOTA_TRACE_ERROR("Error reading ResourceSignature:signatures[0] %d", tmp_status);
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
 
     FOTA_DBG_ASSERT(resource_end >= cur_ptr->buf.p + len);
-
-    fota_status = fota_verify_signature(
-                      signed_data_ptr, signed_data_size,
-                      cur_ptr->buf.p, len,
-                      cert);
-    if (fota_status != 0) {
-        FOTA_TRACE_ERROR("fota_verify_signature failed %d", fota_status);
-        return fota_status;
-    }
+#if !defined(FOTA_TEST_MANIFEST_BYPASS_VALIDATION)
+    // Make sure fota_status has erroneous value before the call
+    fota_sig_status = fota_verify_signature(
+                          signed_data_ptr, signed_data_size,
+                          cur_ptr->buf.p, len);
+    FOTA_FI_SAFE_COND(
+        fota_sig_status == FOTA_STATUS_SUCCESS,
+        fota_sig_status,
+        "fota_verify_signature failed %d", fota_sig_status
+    );
+#endif  // !defined(FOTA_TEST_MANIFEST_BYPASS_VALIDATION)
 
     if (cur_ptr->next != NULL) {
         FOTA_MANIFEST_TRACE_DEBUG("Could be only one sequence");
@@ -606,18 +614,18 @@ int fota_manifest_parse(
     }
     p = resource;
     FOTA_MANIFEST_TRACE_DEBUG("Reading Resource:uri OPTIONAL @%d", (p - input_data));
-    tls_status = mbedtls_asn1_get_tag(
+    tmp_status = mbedtls_asn1_get_tag(
                      &p, resource_end, &len,
                      MBEDTLS_ASN1_UTF8_STRING);
-    if (tls_status == MBEDTLS_ERR_ASN1_UNEXPECTED_TAG) {
+    if (tmp_status == MBEDTLS_ERR_ASN1_UNEXPECTED_TAG) {
         FOTA_MANIFEST_TRACE_DEBUG("Resource:uri OPTIONAL is missing");
     } else {
         p += len;
     }
     FOTA_MANIFEST_TRACE_DEBUG("Reading Resource:resourceType @%d", (p - input_data));
-    tls_status = mbedtls_asn1_get_enumerated_value(&p, resource_end, &resource_type);
-    if (tls_status != 0) {
-        FOTA_TRACE_ERROR("Error reading Resource:resourceType %d", tls_status);
+    tmp_status = mbedtls_asn1_get_enumerated_value(&p, resource_end, &resource_type);
+    if (tmp_status != 0) {
+        FOTA_TRACE_ERROR("Error reading Resource:resourceType %d", tmp_status);
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
     FOTA_MANIFEST_TRACE_DEBUG("Resource:resourceType=%d", resource_type);
@@ -627,26 +635,29 @@ int fota_manifest_parse(
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
     FOTA_MANIFEST_TRACE_DEBUG("Resource:Manifest @%d", (p - input_data));
-    tls_status = mbedtls_asn1_get_tag(
+    tmp_status = mbedtls_asn1_get_tag(
                      &p, resource_end, &len,
                      MBEDTLS_ASN1_CONSTRUCTED | MBEDTLS_ASN1_SEQUENCE);
-    if (tls_status != 0) {
-        FOTA_TRACE_ERROR("Error reading Resource:Manifest %d", tls_status);
+    if (tmp_status != 0) {
+        FOTA_TRACE_ERROR("Error reading Resource:Manifest %d", tmp_status);
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
     FOTA_DBG_ASSERT(resource_end >= p + len);
 
-    fota_status = parse_manifest_internal(
-                      p, len,
-                      fw_info,
-                      input_data);
-    if (fota_status != 0) {
-        FOTA_TRACE_ERROR("parse_manifest_internal failed %d", fota_status);
-        return fota_status;
+    tmp_status = parse_manifest_internal(
+                     p, len,
+                     fw_info,
+                     input_data);
+    if (tmp_status != 0) {
+        FOTA_TRACE_ERROR("parse_manifest_internal failed %d", tmp_status);
+        return tmp_status;
     }
 
     FOTA_MANIFEST_TRACE_DEBUG("status = %d", FOTA_STATUS_SUCCESS);
     return FOTA_STATUS_SUCCESS;
+
+fail:
+    return ret;
 
 }
 #endif

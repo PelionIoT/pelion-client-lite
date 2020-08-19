@@ -22,6 +22,9 @@
  */
 
 #include "include/CloudClientStorage.h"
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+#include "lwm2m_endpoint.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,9 +52,10 @@ const void *storage_read_certificate_key(size_t *buffer_size, bool bootstrap);
 const void *storage_read_ca_certificate(size_t *buffer_size, bool bootstrap);
 #endif //defined(PROTOMAN_SECURITY_ENABLE_CERTIFICATE)
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 bool storage_set_credentials(registry_t *registry);
-
 bool storage_set_bootstrap_credentials(registry_t *registry);
+#endif
 
 char *storage_read_internal_endpoint_name(char *buffer, int32_t *buffer_size, const bool bootstrap);
 bool storage_set_internal_endpoint_name(const char *iep);

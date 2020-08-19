@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -19,10 +19,14 @@
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
 
+#define TRACE_GROUP "FOTA"
+
 #include "fota/fota.h"
 #include "fota/fota_source.h"
 #include "fota/fota_internal.h"
 #include "fota/fota_event_handler.h"
+#include "fota/fota_component_defs.h"
+#include "fota/fota_component.h"
 
 #include <inttypes.h>
 
@@ -43,10 +47,11 @@ void fota_app_defer(uint32_t token)
 
 void fota_app_resume(void)
 {
-    fota_event_handler_defer_with_data(fota_on_resume, NULL, 0);
+    fota_event_handler_defer_with_result(fota_on_resume, 0, 0);
 }
 
-FOTA_WEAK void fota_app_on_download_progress(uint32_t downloaded_size, uint32_t current_chunk_size, uint32_t total_size)
+#if FOTA_DEFAULT_APP_IFS
+void fota_app_on_download_progress(uint32_t downloaded_size, uint32_t current_chunk_size, uint32_t total_size)
 {
     FOTA_ASSERT(total_size);
     static const uint32_t  print_range_percent = 5;
@@ -63,7 +68,7 @@ FOTA_WEAK void fota_app_on_download_progress(uint32_t downloaded_size, uint32_t 
  * dismiss any update running dialogs.
  *
 */
-FOTA_WEAK int fota_app_on_complete(int32_t status)
+int fota_app_on_complete(int32_t status)
 {
     return FOTA_STATUS_SUCCESS;
 }
@@ -76,7 +81,7 @@ FOTA_WEAK int fota_app_on_complete(int32_t status)
     Note: the authorization call can be postponed and called later.
     This doesn't affect the performance of the Cloud Client.
 */
-FOTA_WEAK int fota_app_on_install_authorization(uint32_t token)
+int fota_app_on_install_authorization(uint32_t token)
 {
     fota_app_authorize(token);
     FOTA_APP_PRINT("Install authorization granted");
@@ -93,18 +98,21 @@ FOTA_WEAK int fota_app_on_install_authorization(uint32_t token)
     Note: the authorization call can be postponed and called later.
     This doesn't affect the performance of the Cloud Client.
 */
-FOTA_WEAK int fota_app_on_download_authorization(
+int fota_app_on_download_authorization(
     uint32_t token,
     const manifest_firmware_info_t *candidate_info,
     fota_component_version_t curr_fw_version
 )
 {
+    char curr_semver[FOTA_COMPONENT_MAX_SEMVER_STR_SIZE] = { 0 };
+    char new_semver[FOTA_COMPONENT_MAX_SEMVER_STR_SIZE] = { 0 };
+    fota_component_version_int_to_semver(curr_fw_version, curr_semver);
+    fota_component_version_int_to_semver(candidate_info->version, new_semver);
     FOTA_APP_PRINT("---------------------------------------------------");
     FOTA_APP_PRINT(
-        "Updating component %s from version %" PRIu64 " to %" PRIu64,
+        "Updating component %s from version %s to %s",
         candidate_info->component_name,
-        curr_fw_version,
-        candidate_info->version
+        curr_semver, new_semver
     );
     FOTA_APP_PRINT("Update priority %" PRIu32, candidate_info->priority);
 
@@ -130,5 +138,6 @@ FOTA_WEAK int fota_app_on_download_authorization(
     */
     return FOTA_STATUS_SUCCESS;
 }
+#endif // FOTA_DEFAULT_APP_IFS
 
 #endif  // MBED_CLOUD_CLIENT_FOTA_ENABLE

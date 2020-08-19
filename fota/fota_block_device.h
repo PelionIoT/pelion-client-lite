@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -25,14 +25,6 @@
 extern "C" {
 #endif
 
-#define FOTA_INTERNAL_FLASH_BD      1
-#define FOTA_CUSTOM_BD              2
-#define FOTA_EXTERNAL_BD            3
-
-// For testing purposes
-int fota_bd_create(uint32_t size, uint32_t read_size, uint32_t prog_size,
-                   uint32_t erase_size);
-
 /*
  * Pelion FOTA block device initialize
  *
@@ -51,9 +43,11 @@ int fota_bd_deinit(void);
 
 /*
  * Pelion FOTA block device size getter
- * \return block device size. A positive value on success 0 otherwise.
+ *
+ * \param[out] size Block device size.
+ * \return FOTA_STATUS_SUCCESS on success
  */
-uint32_t fota_bd_size(void);
+int fota_bd_size(uint32_t *size);
 
 /*
  * Pelion FOTA block device read.
@@ -94,31 +88,36 @@ int fota_bd_erase(uint32_t addr, uint32_t size);
 /*
  * Pelion FOTA block device get the size of a readable block.
  *
- * \return The size of a readable block in bytes.
+ * \param[out] read_size The size of a readable block in bytes.
+ * \return FOTA_STATUS_SUCCESS on success
  */
-uint32_t fota_bd_get_read_size(void);
+int fota_bd_get_read_size(uint32_t *read_size);
 
 /*
  * Pelion FOTA block device get the size of a programmable block.
  *
- * \return The size of a programmable block in bytes. A positive value on success 0 otherwise.
+ * \param[out] prog_size The size of a programmable block in bytes. A positive value on success 0 otherwise.
+ * \return FOTA_STATUS_SUCCESS on success
  */
-uint32_t fota_bd_get_program_size(void);
+int fota_bd_get_program_size(uint32_t *prog_size);
 
 /*
  * Pelion FOTA block device get the size of a erasable block given address.
  *
- * \param[in] addr Address of erasable block.
- * \return The size of an erasable block in bytes. A positive value on success 0 otherwise.
+ * \param[in]  addr Address of erasable block.
+ * \param[out] erase_size The size of an erasable block in bytes. A positive value on success 0 otherwise.
+ * \return FOTA_STATUS_SUCCESS on success
  */
-uint32_t fota_bd_get_erase_size(uint32_t addr);
+int fota_bd_get_erase_size(uint32_t addr, uint32_t *erase_size);
 
 /*
  * Pelion FOTA block device get the value of storage when erased.
  *
- * \returns erase value.
+ * \param[out] erase_value erase value if non negative.
+ *             If negative, means that the one can't rely on this value for this block device.
+ * \return FOTA_STATUS_SUCCESS on success
  */
-uint8_t fota_bd_get_erase_value(void);
+int fota_bd_get_erase_value(int *erase_value);
 
 #ifdef __cplusplus
 }

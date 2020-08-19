@@ -165,7 +165,11 @@ void* protoman_layer_mbedos_socket_new()
     if (NULL != layer_mbedos_socket) {
 #ifdef PROTOMAN_VERBOSE
         layer = (struct protoman_layer_s *)layer_mbedos_socket;
-        layer->name = "Mbed OS Socket";
+#ifdef MBED_CONF_MBED_TRACE_ENABLE
+        layer->name = "Mbed OS Socket"; // must be set before first print from this layer
+#else
+        layer->name = NULL;
+#endif
 #endif
         protoman_verbose("new Mbed OS socket layer at %p", layer_mbedos_socket);
     } else {
@@ -610,7 +614,7 @@ static int _do_read(struct protoman_layer_s *layer)
     }
 
     /* EOF -> disconnect */
-    if (0 == retval) {
+    if (!protoman->config.is_dgram && 0 == retval) {
         protoman_warn("EOF");
         if (PROTOMAN_STATE_DISCONNECTED == protoman->target_state) {
             state_retval = PROTOMAN_STATE_RETVAL_DISCONNECT;

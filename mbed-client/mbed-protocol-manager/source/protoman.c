@@ -171,50 +171,53 @@ static void _protoman_state_change(struct protoman_s *protoman, int new_state)
     /* protoman_event() must be called before event_cb() in case protoman_close() within the callback */
     protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
 
+    int event_id;
     switch (new_state) {
         case PROTOMAN_STATE_INITIALIZED:
             protoman_info("initialized");
-            protoman->event_cb(protoman, NULL, PROTOMAN_EVENT_INITIALIZED, protoman->event_ctx);
+            event_id = PROTOMAN_EVENT_INITIALIZED;
+
             break;
         case PROTOMAN_STATE_CONNECTING:
             protoman_info("connecting");
-            break;
+            return;
         case PROTOMAN_STATE_CONNECTED:
             protoman_info("connected");
-            protoman->event_cb(protoman, NULL, PROTOMAN_EVENT_CONNECTED, protoman->event_ctx);
+            event_id = PROTOMAN_EVENT_CONNECTED;
             break;
         case PROTOMAN_STATE_DISCONNECTING:
             protoman_info("disconnecting");
-            break;
+            return;
         case PROTOMAN_STATE_DISCONNECTED:
             protoman_info("disconnected");
-            protoman->event_cb(protoman, NULL, PROTOMAN_EVENT_DISCONNECTED, protoman->event_ctx);
+            event_id = PROTOMAN_EVENT_DISCONNECTED;
             break;
         case PROTOMAN_STATE_PAUSING:
             protoman_info("pausing");
-            break;
+            return;
         case PROTOMAN_STATE_PAUSED:
             protoman_info("paused");
-            protoman->event_cb(protoman, NULL, PROTOMAN_EVENT_PAUSED, protoman->event_ctx);
+            event_id = PROTOMAN_EVENT_PAUSED;
             break;
         case PROTOMAN_STATE_RESUMING:
             protoman_info("resuming");
-            break;
+            return;
         case PROTOMAN_STATE_RESUMED:
             protoman_info("resumed");
-            protoman->event_cb(protoman, NULL, PROTOMAN_EVENT_RESUMED, protoman->event_ctx);
+            event_id = PROTOMAN_EVENT_RESUMED;
             break;
         case PROTOMAN_STATE_ERRORED:
             protoman_err("errored");
             protoman->event_cb(protoman, protoman->first_error, PROTOMAN_EVENT_ERROR, protoman->event_ctx);
-            break;
+            return;
         case PROTOMAN_STATE_ERRORING:
             // The erroring state is just a transient state, which can be left to default handler (at cost of a warning trace)
         default:
             protoman_info("unhandled state: %d", new_state);
-            protoman->event_cb(protoman, NULL, PROTOMAN_APPEVENT_STATE_CHANGE, protoman->event_ctx);
-            break;
+            event_id = PROTOMAN_APPEVENT_STATE_CHANGE;
     }
+
+    protoman->event_cb(protoman, NULL, event_id, protoman->event_ctx);
 }
 
 uint8_t protoman_get_state(struct protoman_s *protoman)
@@ -709,23 +712,19 @@ void protoman_event_handler(arm_event_s *event)
     switch (event->event_type) {
         case PROTOMAN_EVENT_INITIALIZED:
             layer->perceived_state = PROTOMAN_STATE_INITIALIZED;
-            protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
             break;
         case PROTOMAN_EVENT_CONNECTED:
             layer->perceived_state = PROTOMAN_STATE_CONNECTED;
-            protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
             break;
         case PROTOMAN_EVENT_DISCONNECTED:
             layer->perceived_state = PROTOMAN_STATE_DISCONNECTED;
             _protoman_state_change(protoman, PROTOMAN_STATE_DISCONNECTING);
-            break;
+            goto skip_event;
         case PROTOMAN_EVENT_PAUSED:
             layer->perceived_state = PROTOMAN_STATE_PAUSED;
-            protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
             break;
         case PROTOMAN_EVENT_RESUMED:
             layer->perceived_state = PROTOMAN_STATE_RESUMED;
-            protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
             break;
         case PROTOMAN_EVENT_ERROR:
             if (NULL == protoman->first_error) {
@@ -733,8 +732,13 @@ void protoman_event_handler(arm_event_s *event)
             }
             layer->perceived_state = PROTOMAN_STATE_ERRORED;
             _protoman_state_change(protoman, PROTOMAN_STATE_ERRORING);
-            break;
+            // fall through
+        default:
+            goto skip_event;
     }
+    protoman_event(protoman, NULL, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
+
+skip_event:
 
     /* Handle run/timer events (go directly to the calling layer */
     switch (event->event_type) {

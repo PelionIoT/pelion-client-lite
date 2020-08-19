@@ -109,9 +109,11 @@ lwm2m_interface_t *pdmc_connect_get_interface(void);
 * \param callback A `registry_callback_t` type of a callback that will be notified on changes in a Resource.
 * \return `1` in success.
 */
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 int pdmc_connect_add_cloud_resource(registry_t *registry, registry_path_t *path,
                                         const uint16_t object, const uint16_t object_instance, const uint16_t resource,
                                         bool auto_observable, registry_callback_t callback);
+#endif
 
 /**
 * \brief Get information on a connected endpoint.
@@ -119,6 +121,23 @@ int pdmc_connect_add_cloud_resource(registry_t *registry, registry_path_t *path,
 * \return True in success, false in failure.
 */
 bool pdmc_connect_endpoint_info(pdmc_endpoint_info_s *endpoint_info);
+
+/**
+* \brief Get endpoint name.
+* Can be called before connecting, but must only be called after `pdmc_connect_init()`.
+* \param endpoint_name Output buffer that on a succesful call will contain the endpoint name as a C string.
+* \param size The size of the `endpoint_name` buffer. Any data that doesn't fit will be discarded.
+* \return True in success, false in failure.
+*/
+bool pdmc_connect_get_endpoint_name(char *endpoint_name, size_t size);
+
+/**
+* \brief Get device id of a connected device.
+* \param device_id Output buffer that on a succesful call will contain the device id as a C string.
+* \param size The size of the `device_id` buffer. Any data that doesn't fit will be discarded.
+* \return True in success, false in failure.
+*/
+bool pdmc_connect_get_device_id(char *device_id, size_t size);
 
 /**
 * \brief Pause Device Management Client's timed functionality and close network connection

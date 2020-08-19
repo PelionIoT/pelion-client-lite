@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -38,15 +38,17 @@ typedef enum {
     FOTA_CANDIDATE_ITERATE_FINISH,  /**< sent once on candidate iteration finish event */
 } fota_candidate_iterate_status;
 
+// Block checksum (in case of resume and non encrypted blocks)
+typedef uint16_t fota_candidate_block_checksum_t;
+
 /**
  * Candidate iterate callback info
  *
- * status iterate status
+ * status iterate status.
  * frag_size fragment size.
  * frag_pos fragment position.
  * frag_buf fragment buffer.
- * salt Salt from candidate header encryption metadata
- * header_info candidate header info
+ * header_info candidate header info.
  * user_ctx user data, which lives between the calls to the callbacks
  */
 typedef struct {
@@ -54,24 +56,19 @@ typedef struct {
     uint32_t frag_size;
     uint32_t frag_pos;
     uint8_t  *frag_buf;
-    uint8_t  *salt;
     fota_header_info_t *header_info;
     void *user_ctx;
 } fota_candidate_iterate_callback_info;
-
-typedef int (*fota_candidate_iterate_handler_t)(const fota_candidate_iterate_callback_info *info);
 
 /**
  * Candidate config info
  *
  * storage_size storage size used for candidate.
  * storage_start_addr storage start address for candidate.
- * encrypt_block_size encryption block size for candidate encryption.
  */
 typedef struct {
     uint32_t    storage_size;
     uint32_t    storage_start_addr;
-    uint32_t    encrypt_block_size;
 } fota_candidate_config_t;
 
 /**
@@ -95,7 +92,7 @@ const fota_candidate_config_t *fota_candidate_get_config(void);
  * \param[in] info iterate callback info.
  * \return FOTA_STATUS_SUCCESS on success.
  */
-typedef int (*fota_candidate_iterate_handler_t)(const fota_candidate_iterate_callback_info *info);
+typedef int (*fota_candidate_iterate_handler_t)(fota_candidate_iterate_callback_info *info);
 
 /**
  * Iterate on candidate image.
@@ -103,18 +100,41 @@ typedef int (*fota_candidate_iterate_handler_t)(const fota_candidate_iterate_cal
  * \param[in] validate optionally validate image on storage, could add significant time to validate candidate.
  * \param[in] force_encrypt force encryption.
  * \param[in] expected_comp_name expected component name.
+ * \param[in] install_alignment  installer alignment in bytes.
  * \param[in] handler callback called on iteration start, each fragment and finish.
  * \return FOTA_STATUS_SUCCESS on success.
  */
 int fota_candidate_iterate_image(bool validate, bool force_encrypt, const char *expected_comp_name,
-                                 fota_candidate_iterate_handler_t handler);
+                                 uint32_t install_alignment, fota_candidate_iterate_handler_t handler);
+
+/**
+ * Read candidate component ready header.
+ *
+ * \param[in,out] addr candidate header address.
+ * \param[in] bd_read_size bd read size.
+ * \param[in] bd_prog_size bd program size.
+ * \param[out] header candidate ready header.
+ * \return FOTA_STATUS_SUCCESS if found.
+ */
+int fota_candidate_read_candidate_ready_header(uint32_t *addr, uint32_t bd_read_size, uint32_t bd_prog_size,
+                                               fota_candidate_ready_header_t *header);
+
+/**
+ * Read candidate image header.
+ *
+ * \param[in,out] addr image header address.
+ * \param[in] bd_read_size bd read size.
+ * \param[in] bd_prog_size bd program size.
+ * \param[out] header image header info.
+ * \return FOTA_STATUS_SUCCESS if found.
+ */
+int fota_candidate_read_header(uint32_t *addr, uint32_t bd_read_size, uint32_t bd_prog_size, fota_header_info_t *header);
 
 /**
  * Erase current candidate.
  *
  * \return FOTA_STATUS_SUCCESS on success.
  */
-
 int fota_candidate_erase(void);
 
 #ifdef __cplusplus

@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -19,50 +19,45 @@
 #ifndef __FOTA_HEADER_INFO_H_
 #define __FOTA_HEADER_INFO_H_
 
-#include <stdint.h>
 #include "fota/fota_base.h"
 #include "fota/fota_crypto_defs.h"
 #include "fota/fota_component_defs.h"
+#include "fota/fota_status.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #if !defined(MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION)
-#define MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION 3
+#error MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION expected to be set in fota_config.h
 #endif
 
-#if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION >= 3)
-#define FOTA_HEADER_HAS_CANDIDATE_READY 1
-#else
-#define FOTA_HEADER_HAS_CANDIDATE_READY 0
+#if !defined(FOTA_HEADER_HAS_CANDIDATE_READY)
+#error FOTA_HEADER_HAS_CANDIDATE_READY expected to be set in fota_config.h
 #endif
 
-#if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION >= 3)
-#define FOTA_HEADER_SUPPORTS_ENCRYPTION 1
-#else
-#define FOTA_HEADER_SUPPORTS_ENCRYPTION 0
-#endif
 
 #define FOTA_FW_HEADER_MAGIC ((uint32_t)(0x5c0253a3))
 
 #define FOTA_CANDIDATE_READY_MAGIC ((uint32_t)(0xfed54e01))
 
-#if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION == 3)
-#if !defined(MBED_CLOUD_CLIENT_FOTA_ENCRYPTION_SUPPORT)
-#define MBED_CLOUD_CLIENT_FOTA_ENCRYPTION_SUPPORT 1
-#endif
-#else
-#if (MBED_CLOUD_CLIENT_FOTA_ENCRYPTION_SUPPORT == 1)
-#error MBED_CLOUD_CLIENT_FOTA_ENCRYPTION_SUPPORT enabled only for header version 3
-#endif
+#if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION == 2)
+#define ARM_UC_HEADER_SIZE_V2_EXTERNAL             (296)
+#define ARM_UC_HEADER_SIZE_V2_INTERNAL             (112)
+
+#define ARM_UC_HEADER_MAGIC_V2_EXTERNAL            (0x5a51b3d4UL)
+#define ARM_UC_HEADER_MAGIC_V2_INTERNAL            (0x5a51b3d4UL)
 #endif
 
 // Tells that we have a candidate ready
 typedef struct {
     uint32_t magic;
     char comp_name[FOTA_COMPONENT_MAX_NAME_SIZE];
+    uint32_t footer;
 } fota_candidate_ready_header_t;
+
+#define FOTA_HEADER_ENCRYPTED_FLAG              0x01
+#define FOTA_HEADER_SUPPORT_RESUME_FLAG         0x02
 
 /*
  * FW header as found in flash.
@@ -75,12 +70,48 @@ typedef struct {
     uint32_t magic;                                 /*< Magic value */
     uint32_t fw_size;                               /*< FW size in bytes */
     uint64_t version;                               /*< FW version - timestamp */
+#if defined(MBED_CLOUD_CLIENT_FOTA_SIGNED_IMAGE_SUPPORT)
+    uint8_t signature[FOTA_IMAGE_RAW_SIGNATURE_SIZE]; /*< RAW ECDSA signature */
+#endif  // defined(MBED_CLOUD_CLIENT_FOTA_SIGNED_IMAGE_SUPPORT)
     uint8_t digest[FOTA_CRYPTO_HASH_SIZE];          /*< FW image SHA256 digest */
-    uint8_t precursor[FOTA_CRYPTO_HASH_SIZE];       /*< Only relevant for update candidate - contains previously installed FW SHA256 digest */
+
+    // From this point on, all fields are relevant to candidate only and
+    // can be skipped by bootloader if it wishes not to save them internally
+    uint8_t internal_header_barrier;
+    uint8_t flags;                                  /*< Flags */
+    uint16_t block_size;                            /*< Block size. Encryption block size if encrypted,
+                                                        validated block size if unencrypted and block validation turned on */
+    uint8_t precursor[FOTA_CRYPTO_HASH_SIZE];       /*< contains previously installed FW SHA256 digest */
+    uint32_t footer;
 } fota_header_info_t;
 
-size_t fota_get_header_size(void);
-void fota_set_header_info_magic(fota_header_info_t *header_info);
+static inline size_t fota_get_header_size(void)
+{
+#if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION == 2)
+#if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_EXTERNAL == 1)
+    return ARM_UC_HEADER_SIZE_V2_EXTERNAL;
+#else
+    return ARM_UC_HEADER_SIZE_V2_INTERNAL;
+#endif
+#elif (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION == 3)
+    return sizeof(fota_header_info_t);
+#endif
+}
+
+static inline void fota_set_header_info_magic(fota_header_info_t *header_info)
+{
+#if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION == 2)
+#if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_EXTERNAL == 1)
+    header_info->magic = ARM_UC_HEADER_MAGIC_V2_EXTERNAL;
+#else
+    header_info->magic = ARM_UC_HEADER_MAGIC_V2_INTERNAL;
+#endif
+#elif (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION == 3)
+    header_info->magic = FOTA_FW_HEADER_MAGIC;
+    header_info->footer = FOTA_FW_HEADER_MAGIC;
+#endif
+}
+
 int fota_deserialize_header(const uint8_t *buffer, size_t buffer_size, fota_header_info_t *header_info);
 int fota_serialize_header(const fota_header_info_t *header_info, uint8_t *header_buf, size_t header_buf_size, size_t *header_buf_actual_size);
 

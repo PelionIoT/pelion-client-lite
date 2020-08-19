@@ -86,9 +86,27 @@ typedef enum {  // note these are encapsulated to u8 type, so remember limit 255
 #endif
 } application_event_t;
 
+#ifndef MBED_CLOUD_CLIENT_MANUFACTURER_VALUE
 extern const char           MBED_CLOUD_DEV_MANUFACTURER[];
+#define MBED_CLOUD_CLIENT_MANUFACTURER_VALUE ((const char*)MBED_CLOUD_DEV_MANUFACTURER)
+#endif
+#ifndef MBED_CLOUD_CLIENT_MODEL_NUMBER_VALUE
 extern const char           MBED_CLOUD_DEV_MODEL_NUMBER[];
+#define MBED_CLOUD_CLIENT_MODEL_NUMBER_VALUE ((const char*)MBED_CLOUD_DEV_MODEL_NUMBER)
+#endif
+#ifndef MBED_CLOUD_CLIENT_SERIAL_NUMBER_VALUE
 extern const char           MBED_CLOUD_DEV_SERIAL_NUMBER[];
+#define MBED_CLOUD_CLIENT_SERIAL_NUMBER_VALUE ((const char*)MBED_CLOUD_DEV_SERIAL_NUMBER)
+#endif
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+static const char *manufacturer_res_id = "/3/0/0";
+static const char *model_number_res_id = "/3/0/1";
+static const char *serial_number_res_id = "/3/0/2";
+static const char *reboot_res_id = "/3/0/4";
+static const char *error_code_res_id = "/3/0/11";
+static const char *supported_binding_res_id = "/3/0/16";
+#endif
 
 static int8_t               internal_event_handler_id;
 static int8_t               app_event_handler_id;
@@ -97,7 +115,9 @@ static arm_event_storage_t  user_allocated_event;
 static bool                 event_in_flight;
 
 static void pdmc_connect_event_handler(arm_event_s *event);
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static void print_registry_status_code(registry_status_t status);
+#endif
 static void send_event(uint8_t event_type);
 static void forward_event_to_external_interface(arm_event_t *orig_event);
 static oma_lwm2m_binding_and_mode_t get_binding_mode(void);
@@ -106,7 +126,12 @@ static registry_status_t reboot_callback(registry_callback_type_t type,
                                          const registry_callback_token_t *token,
                                          const registry_object_value_t *value,
                                          const registry_notification_status_t notification_status,
-                                         registry_t *registry);
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+                                         registry_t *registry
+#else
+                                         void *endpoint_t
+#endif
+                                         );
 
 /**
 * \brief initialises update
@@ -190,6 +215,7 @@ static void pdmc_connect_event_handler(arm_event_t *event)
     }
 }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static void print_registry_status_code(registry_status_t status)
 {
 #if MBED_CONF_MBED_TRACE_ENABLE
@@ -222,56 +248,140 @@ static void print_registry_status_code(registry_status_t status)
 #else
 #endif
 }
-
-static registry_status_t reboot_callback(registry_callback_type_t type,
-                                        const registry_path_t *path,
-                                        const registry_callback_token_t *token,
-                                        const registry_object_value_t *value,
-                                        const registry_notification_status_t notification_status,
-                                        registry_t *registry);
+#endif
 
 void simple_m2m_create_optional_default_objects(void)
 {
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     registry_status_t ret;
     registry_path_t path;
     registry_t *registry = &interface.endpoint.registry;
 
     // Manufacturer  // problematic if these are set here as easy setting set by app get overwritten
     pdmc_connect_add_cloud_resource(registry, &path, 3, 0, 0, true, NULL);
-    ret = registry_set_value_string(registry, &path, (char *)MBED_CLOUD_DEV_MANUFACTURER, false);
+    ret = registry_set_value_string(registry, &path, MBED_CLOUD_CLIENT_MANUFACTURER_VALUE, false);
     print_registry_status_code(ret);
     ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
     print_registry_status_code(ret);
 
     // Model Number
     pdmc_connect_add_cloud_resource(registry, &path, 3, 0, 1, true, NULL);
-    ret = registry_set_value_string(registry, &path, (char *)MBED_CLOUD_DEV_MODEL_NUMBER, false);
+    ret = registry_set_value_string(registry, &path, MBED_CLOUD_CLIENT_MODEL_NUMBER_VALUE, false);
     print_registry_status_code(ret);
     ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
     print_registry_status_code(ret);
 
     // Serial Number
     pdmc_connect_add_cloud_resource(registry, &path, 3, 0, 2, true, NULL);
-    ret = registry_set_value_string(registry, &path, (char*)MBED_CLOUD_DEV_SERIAL_NUMBER, false);
+    ret = registry_set_value_string(registry, &path, MBED_CLOUD_CLIENT_SERIAL_NUMBER_VALUE, false);
     print_registry_status_code(ret);
     ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
     print_registry_status_code(ret);
+#endif
 }
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+static int get_device_object_resources(endpoint_t *endpoint, register_resource_t **res)
+{
+    register_resource_t *curr;
+
+    // manufacturer
+    curr = endpoint_create_register_resource_str(endpoint, manufacturer_res_id, true,
+                                                 (uint8_t*)MBED_CLOUD_CLIENT_MANUFACTURER_VALUE, strlen(MBED_CLOUD_CLIENT_MANUFACTURER_VALUE));
+    *res = curr;
+    if (!curr) {
+        return -1;
+    }
+
+    // model number
+    curr->next = endpoint_create_register_resource_str(endpoint, model_number_res_id, true,
+                                                       (uint8_t*)MBED_CLOUD_CLIENT_MODEL_NUMBER_VALUE, strlen(MBED_CLOUD_CLIENT_MODEL_NUMBER_VALUE));
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+
+    // serial number
+    curr->next = endpoint_create_register_resource_str(endpoint, serial_number_res_id, true,
+                                                       (uint8_t*)MBED_CLOUD_CLIENT_SERIAL_NUMBER_VALUE, strlen(MBED_CLOUD_CLIENT_SERIAL_NUMBER_VALUE));
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+
+    // reboot
+    curr->next = endpoint_create_register_resource(endpoint, reboot_res_id, false);
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+
+    // error code
+    curr->next = endpoint_create_register_resource_int(endpoint, error_code_res_id, false, 0);
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+
+    // supported bindings
+    curr->next = endpoint_create_register_resource(endpoint, supported_binding_res_id, false);
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+
+    return 0;
+}
+
+static sn_coap_hdr_s *on_coap_request(const registry_path_t* path,
+                                      endpoint_t *endpoint,
+                                      const sn_coap_hdr_s *request,
+                                      sn_nsdl_addr_s *address,
+                                      sn_coap_hdr_s *response,
+                                      int *acked)
+{
+
+    tr_debug("dmc_connect_api - on_coap_request()");
+
+    if (0 != memcmp("3/0/4", (char*)request->uri_path_ptr, request->uri_path_len)) {
+        response->msg_code = COAP_MSG_CODE_RESPONSE_NOT_FOUND;
+    } else {
+        tr_debug("dmc_connect_api on_coap_request() - response code: %d", response->msg_code);
+        response->msg_code = COAP_MSG_CODE_EMPTY;
+        registry_callback_t callback = endpoint_get_object_callback(endpoint, 3);
+        if (callback) {
+            if (send_callback_data(path, request, REGISTRY_CALLBACK_EXECUTE)) {
+                endpoint->confirmable_response.pending = true;
+                response->msg_code = COAP_MSG_CODE_EMPTY;
+                endpoint_send_coap_message(endpoint, address, response);
+                *acked = 1;
+            } else {
+                response->msg_code = COAP_MSG_CODE_RESPONSE_INTERNAL_SERVER_ERROR;
+            }
+        } else {
+            response->msg_code = COAP_MSG_CODE_RESPONSE_NOT_FOUND;
+        }
+    }
+
+    return response;
+}
+#endif
 
 void simple_m2m_create_device_object(void)
 {
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     registry_status_t ret;
     registry_path_t path;
     registry_t *registry = &interface.endpoint.registry;
 
     // Reboot
-    pdmc_connect_add_cloud_resource(registry, &path, 3, 0, 4, true, reboot_callback);  // created by default by default by cpp device class
+    pdmc_connect_add_cloud_resource(registry, &path, M2M_DEVICE_ID, 0, DEVICE_REBOOT, true, reboot_callback);  // created by default by default by cpp device class
 
     // none type can't be set to reg msg, fixed by removing assert still not worky, additionally test cases assume that delete to these fails with 400 or 405 not 404 as now happens
     ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
 
     // Error Code
-    registry_set_path(&path, 3, 0, 11, 0, REGISTRY_PATH_RESOURCE_INSTANCE);   // created by default by default by cpp device class
+    registry_set_path(&path, M2M_DEVICE_ID, 0, DEVICE_ERROR_CODE, 0, REGISTRY_PATH_RESOURCE_INSTANCE);   // created by default by default by cpp device class
     print_registry_status_code(ret);
     ret = registry_set_value_int(registry, &path, 0);
     print_registry_status_code(ret);
@@ -279,9 +389,10 @@ void simple_m2m_create_device_object(void)
     print_registry_status_code(ret);
 
     // Supported Binding and Modes
-    pdmc_connect_add_cloud_resource(registry, &path, 3, 0, 16, true, NULL);    // created by default by default by cpp device class
+    pdmc_connect_add_cloud_resource(registry, &path, M2M_DEVICE_ID, 0, DEVICE_SUPPORTED_BINDING_MODE, true, NULL);    // created by default by default by cpp device class
     ret = registry_set_value_string(registry, &path, (char *)BINDING_MODE_UDP, false);
     print_registry_status_code(ret);
+#endif
 }
 
 // todo this should likely be in application side.
@@ -290,7 +401,12 @@ static registry_status_t reboot_callback(registry_callback_type_t type,
                                          const registry_callback_token_t *token,
                                          const registry_object_value_t *value,
                                          const registry_notification_status_t notification_status,
-                                         registry_t *registry)
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+                                         registry_t *registry
+#else
+                                         void *endpoint
+#endif
+                                         )
 {
     if (notification_status == NOTIFICATION_STATUS_IGNORE) {
         // This status means we've just received the POST request.
@@ -387,12 +503,25 @@ void pdmc_connect_init(uint8_t event_handler_id)
         assert(false);
     }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     simple_m2m_create_device_object();  // moved to end of setup so that these can be changed by app
     simple_m2m_create_optional_default_objects();  // init manufactor modelnumber and serial
+#else
+    object_handler_t *handler = endpoint_allocate_object_handler(M2M_DEVICE_ID, get_device_object_resources, on_coap_request, reboot_callback);
+    if (!handler) {
+        tr_error("pdmc_connect_init() failed to allocate object handler");
+        assert(handler); // if this happens it's a fatal error
+        return;
+    }
+    endpoint_register_object_handler(&(pdmc_connect_get_interface()->endpoint), handler);
+#endif
 }
 
 void pdmc_connect_deinit(void)
 {
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    endpoint_remove_object_handler(&(pdmc_connect_get_interface()->endpoint), M2M_DEVICE_ID);
+#endif
     eventOS_cancel(&user_allocated_event);
     lwm2m_interface_clean(&interface);
 }
@@ -434,6 +563,7 @@ void pdmc_connect_resume(void *iface)
     send_event(APPLICATION_EVENT_RESUME);
 }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 int pdmc_connect_add_cloud_resource(registry_t *registry, registry_path_t *path,
                                     const uint16_t object, const uint16_t object_instance, const uint16_t resource,
                                     bool auto_observable, registry_callback_t callback)
@@ -451,22 +581,51 @@ int pdmc_connect_add_cloud_resource(registry_t *registry, registry_path_t *path,
 
     return (ret == REGISTRY_STATUS_OK);
 }
+#endif
 
 bool pdmc_connect_endpoint_info(pdmc_endpoint_info_s *endpoint_info)
 {
-    int32_t size = (sizeof(endpoint_info->endpoint_name)-1);
-    char *name_end;
+    bool success;
 
-    name_end = (char*)storage_read_endpoint_name(endpoint_info->endpoint_name, &size, true);
-    if (!name_end || name_end == endpoint_info->endpoint_name) {
+    success = pdmc_connect_get_endpoint_name(endpoint_info->endpoint_name, sizeof(endpoint_info->endpoint_name));
+    if (!success) {
+        return false;
+    }
+
+    success = pdmc_connect_get_device_id(endpoint_info->device_id, sizeof(endpoint_info->device_id));
+    if (!success) {
+        return false;
+    }
+
+    return true;
+}
+
+bool pdmc_connect_get_endpoint_name(char *endpoint_name, size_t size)
+{
+    char *name_end;
+    int32_t tmp_size = size - 1; // leaving room for the terminating nul
+
+    assert(size <= INT32_MAX);
+
+    name_end = (char*)storage_read_endpoint_name(endpoint_name, &tmp_size, true);
+    if (!name_end) {
         return false;
     }
 
     *name_end = '\0';
 
-    size = (sizeof(endpoint_info->device_id)-1);
-    name_end = (char*)storage_read_internal_endpoint_name(endpoint_info->device_id, &size, false);
-    if (!name_end || name_end == endpoint_info->device_id) {
+    return true;
+}
+
+bool pdmc_connect_get_device_id(char *device_id, size_t size)
+{
+    char *name_end;
+    int32_t tmp_size = size - 1; // leaving room for the terminating nul
+
+    assert(size <= INT32_MAX);
+
+    name_end = (char*)storage_read_internal_endpoint_name(device_id, &tmp_size, false);
+    if (!name_end) {
         return false;
     }
 

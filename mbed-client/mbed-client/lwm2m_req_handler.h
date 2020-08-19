@@ -23,8 +23,8 @@
 
 #include <stdint.h>
 
-/*! \file lwm2m_get_req_handler.h
- *  \brief Client Lite internal API for executing direct CoAP GET requests.
+/*! \file lwm2m_req_handler.h
+ *  \brief Client Lite internal API for executing direct CoAP GET/POST/PUT requests.
  */
 
 #ifdef __cplusplus
@@ -35,13 +35,16 @@ extern "C" {
  * \brief Destroy all the allocated data.
  *
  */
-void get_handler_destroy(void);
+void req_handler_destroy(void);
 
 /**
- * \brief Send the Constrained Application Protocol (CoAP) GET request to the server.
+ * \brief Send the Constrained Application Protocol (CoAP) GET/POST/PUT request to the server.
+ *
+ * \note POST and PUT request are only supported if COAP_MSG_CODE_REQUEST_GET macro is not defined.
  *
  * \param endpoint Endpoint info.
  * \param type Download type.
+ * \param msg_code CoAP request type GET/POST/PUT.
  * \param uri URI path to the data.
  * \param offset Data offset.
  * \param async In async mode, the application must call this API again with the updated offset.
@@ -49,16 +52,21 @@ void get_handler_destroy(void);
  * \param data_cb Callback triggered once there is data available.
  * \param error_cb Callback trigged in case of any error.
  * \param context Application context.
+ * \param payload Payload for POST/PUT request, NULL for GET.
+ * \param payload_len Length of payload or zero in case of GET request.
  *
 */
-void get_handler_send_get_data_request(endpoint_t *endpoint,
+void req_handler_send_data_request(endpoint_t *endpoint,
                                        DownloadType type,
+                                       sn_coap_msg_code_e msg_code,
                                        const char *uri,
                                        const size_t offset,
                                        const bool async,
                                        get_data_cb data_cb,
                                        get_data_error_cb error_cb,
-                                       void *context);
+                                       void *context,
+                                       uint8_t *payload,
+                                       uint16_t payload_len);
 
 /**
  * \brief This function is called by the send queue to send a pending request.
@@ -67,39 +75,39 @@ void get_handler_send_get_data_request(endpoint_t *endpoint,
  * \param endpoint Endpoint info.
 */
 
-void get_handler_send_message(endpoint_t *endpoint);
+void req_handler_send_message(endpoint_t *endpoint);
 
 /**
- * \brief Handle GET response.
+ * \brief Handle GET/POST/PUT response.
  *
  * \param endpoint Endpoint info.
  * \param coap_header Incoming CoAP data.
  *
- * \return True if response matches with the GET request, otherwise False.
+ * \return True if response matches with the GET/POST/PUT request, otherwise False.
 */
-bool get_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap_header);
+bool req_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap_header);
 
 /**
- * \brief Mark all existing GET requests to be re-sent.
+ * \brief Mark all existing GET/POST/PUT requests to be re-sent.
  *
 */
-void get_handler_set_resend_status(void);
+void req_handler_set_resend_status(void);
 
 /**
  * \brief Send all requests that have retry flag set to true.
  *
  * \param endpoint Endpoint info.
 */
-void get_handler_send_pending_request(endpoint_t *endpoint);
+void req_handler_send_pending_request(endpoint_t *endpoint);
 
 /**
- * \brief Remove all pending GET requests.
+ * \brief Remove all pending GET/POST/PUT requests.
  *
  * \param coap_header Incoming CoAP data or NULL.
  * \param call_error_cb If true, the error callback is called.
  * \param error_code Error code to be passed to the error callback.
 */
-void get_handler_free_get_request_list(const sn_coap_hdr_s *coap_header, bool call_error_cb, get_data_req_error_t error_code);
+void req_handler_free_request_list(const sn_coap_hdr_s *coap_header, bool call_error_cb, get_data_req_error_t error_code);
 
 #ifdef __cplusplus
 }

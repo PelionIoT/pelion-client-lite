@@ -20,6 +20,12 @@
 #include <stdint.h>
 #include <string.h>
 
+/*
+ * Some functions can be inlined, and definitions are in protoman_layer.h.
+ * Define PROTOMAN_FN before including it to generate external definitions.
+ */
+#define PROTOMAN_FN extern
+
 #include "mbed-protocol-manager/protoman.h"
 #include "mbed-protocol-manager/protoman_layer.h"
 #define TRACE_GROUP  "Pgen" /* ProtocolManager Generic */
@@ -36,18 +42,21 @@ static const struct protoman_layer_run_delays_s _generic_delays = {
     200    /* do_resume */
 };
 
-void _protoman_layer_record_error(struct protoman_layer_s *layer, int protoman_error, int specific_error, const char *specific_error_str)
+#ifdef PROTOMAN_VERBOSE
+void _protoman_layer_trace_error(struct protoman_layer_s *layer,
+                                int protoman_error,
+                                int specific_error,
+                                const char *specific_error_str)
 {
 #ifdef PROTOMAN_ERROR_STRING
     protoman_verbose("setting protoman_error to %s and specific_error to %d (%s)", protoman_strerror(protoman_error), specific_error, specific_error_str);
-    layer->specific_error_str = specific_error_str;
 #else
-    (void) specific_error_str;
+    (void)specific_error_str;
     protoman_verbose("setting protoman_error to %s and specific_error to %d", protoman_strerror(protoman_error), specific_error);
 #endif // PROTOMAN_ERROR_STRING
-    layer->protoman_error = protoman_error;
-    layer->specific_error = specific_error;
 }
+#endif
+
 
 /* Generated appropriate events upwards */
 void protoman_layer_state_change(struct protoman_layer_s *layer, int new_state)
@@ -72,27 +81,32 @@ void protoman_layer_state_change(struct protoman_layer_s *layer, int new_state)
 
     protoman_event(protoman, layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
 
+    int event_id;
     switch (new_state) {
         case PROTOMAN_STATE_INITIALIZED:
-            protoman_event(protoman, layer, PROTOMAN_EVENT_INITIALIZED, PROTOMAN_EVENT_PRIORITY_LOW, 0);
+            event_id = PROTOMAN_EVENT_INITIALIZED;
             break;
         case PROTOMAN_STATE_CONNECTED:
-            protoman_event(protoman, layer, PROTOMAN_EVENT_CONNECTED, PROTOMAN_EVENT_PRIORITY_LOW, 0);
+            event_id = PROTOMAN_EVENT_CONNECTED;
             break;
         case PROTOMAN_STATE_DISCONNECTED:
-            protoman_event(protoman, layer, PROTOMAN_EVENT_DISCONNECTED, PROTOMAN_EVENT_PRIORITY_LOW, 0);
+            event_id = PROTOMAN_EVENT_DISCONNECTED;
             break;
         case PROTOMAN_STATE_PAUSED:
-            protoman_event(protoman, layer, PROTOMAN_EVENT_PAUSED, PROTOMAN_EVENT_PRIORITY_LOW, 0);
+            event_id = PROTOMAN_EVENT_PAUSED;
             break;
         case PROTOMAN_STATE_RESUMED:
-            protoman_event(protoman, layer, PROTOMAN_EVENT_RESUMED, PROTOMAN_EVENT_PRIORITY_LOW, 0);
+            event_id = PROTOMAN_EVENT_RESUMED;
             break;
         case PROTOMAN_STATE_ERRORED:
-            protoman_event(protoman, layer, PROTOMAN_EVENT_ERROR, PROTOMAN_EVENT_PRIORITY_LOW, 0);
+            event_id = PROTOMAN_EVENT_ERROR;
             break;
+        default:
+            goto no_event;
     }
+    protoman_event(protoman, layer, event_id, PROTOMAN_EVENT_PRIORITY_LOW, 0);
 
+no_event:
     layer->current_state = new_state;
 }
 
@@ -156,6 +170,8 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
         protoman_strstate(layer->current_state),
         protoman_strstate(layer->target_state));
 
+    uint32_t delay;
+
     switch (layer->current_state) {
         case PROTOMAN_STATE_INITIALIZING:
             if (NULL != layer->callbacks->state_do_init) {
@@ -165,9 +181,8 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
                         break;
 
                     case PROTOMAN_STATE_RETVAL_AGAIN:
-                        protoman_event(protoman, layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW,
-                            delays->do_init);
-                        return;
+                        delay = delays->do_init;
+                        goto do_event;
 
                     case PROTOMAN_STATE_RETVAL_ERROR:
                     default:
@@ -196,9 +211,8 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
                         break;
 
                     case PROTOMAN_STATE_RETVAL_AGAIN:
-                        protoman_event(protoman, layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW,
-                            delays->do_connect);
-                        return;
+                        delay = delays->do_connect;
+                        goto do_event;
 
                     case PROTOMAN_STATE_RETVAL_WAIT:
                         /* Do nothing and wait for PROTOMAN_EVENT_DATA_WRITTEN/AVAILABLE */
@@ -244,7 +258,7 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
 
                     case PROTOMAN_STATE_RETVAL_AGAIN:
                         protoman_event(protoman, layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW,
-                            delays->do_read);
+                                       delays->do_read);
                         break;
 
                     case PROTOMAN_STATE_RETVAL_DISCONNECT:
@@ -274,10 +288,9 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
 
                     case PROTOMAN_STATE_RETVAL_AGAIN:
                         protoman_verbose("layer->callbacks->state_do_write() returned PROTOMAN_STATE_RETVAL_AGAIN, call again in %d ms",
-                            (int)delays->do_write);
-                        protoman_event(protoman, layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW,
-                            delays->do_write);
-                        break;
+                                         (int)delays->do_write);
+                        delay = delays->do_write;
+                        goto do_event;
 
                     case PROTOMAN_STATE_RETVAL_DISCONNECT:
                         layer->target_state = PROTOMAN_EVENT_DISCONNECTED;
@@ -301,9 +314,8 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
                         break;
 
                     case PROTOMAN_STATE_RETVAL_AGAIN:
-                        protoman_event(protoman, layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW,
-                            delays->do_disconnect);
-                        return;
+                        delay = delays->do_disconnect;
+                        goto do_event;
 
                     case PROTOMAN_STATE_RETVAL_WAIT:
                         /* wait for PROTOMAN_EVENT_DATA_WRITTEN/AVAILABLE event */
@@ -329,9 +341,8 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
                         break;
 
                     case PROTOMAN_STATE_RETVAL_AGAIN:
-                        protoman_event(protoman, layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW,
-                            delays->do_pause);
-                        return;
+                        delay = delays->do_pause;
+                        goto do_event;
 
                     case PROTOMAN_STATE_RETVAL_WAIT:
                         /* wait for PROTOMAN_EVENT_DATA_WRITTEN/AVAILABLE event */
@@ -366,9 +377,8 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
                          break;
 
                      case PROTOMAN_STATE_RETVAL_AGAIN:
-                         protoman_event(protoman, layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW,
-                             delays->do_resume);
-                         return;
+                        delay = delays->do_resume;
+                        goto do_event;
 
                      case PROTOMAN_STATE_RETVAL_WAIT:
                          /* wait for PROTOMAN_EVENT_DATA_WRITTEN/AVAILABLE event */
@@ -400,8 +410,9 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
             if (PROTOMAN_ERR_CONNECTION_CLOSED == layer->protoman_error) {
                 protoman_info("PROTOMAN_STATE_ERRORING, connection closed.");
             } else {
-                int error = protoman_get_layer_error(protoman);
-                protoman_err("PROTOMAN_STATE_ERRORING %s (%d)", protoman_strstateretval(error), error);
+                protoman_err("PROTOMAN_STATE_ERRORING %s (%d)",
+                             protoman_strstateretval(protoman_get_layer_error(protoman)),
+                             protoman_get_layer_error(protoman));
             }
             protoman_layer_state_change(layer, PROTOMAN_STATE_ERRORED);
             break;
@@ -413,6 +424,11 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
             protoman_err("unknown state: %d", layer->current_state);
             assert(false);
     }
+
+    return;
+
+do_event:
+    protoman_event(protoman, layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, delay);
 }
 
 int protoman_generic_bytes_layer_write(struct protoman_layer_s *layer, struct protoman_io_header_s *operation)

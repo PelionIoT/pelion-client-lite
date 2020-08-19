@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -43,6 +43,13 @@ extern "C" {
 #define FOTA_WEAK __attribute__((weak))
 #endif
 
+#if MBED_CONF_MBED_TRACE_ENABLE
+#include "mbed-trace/mbed_trace.h"
+#define FOTA_TRACE_DEBUG tr_debug
+#define FOTA_TRACE_INFO  tr_info
+#define FOTA_TRACE_ERROR tr_error
+#else
+
 #if FOTA_TRACE_ENABLE
 #if FOTA_TRACE_DBG
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
@@ -54,22 +61,18 @@ extern "C" {
 #define FOTA_TRACE_INFO(fmt, ...)  printf("[FOTA INFO] " fmt "\n", ##__VA_ARGS__)
 #define FOTA_TRACE_ERROR(fmt, ...) printf("[FOTA ERROR] " fmt "\n", ##__VA_ARGS__)
 #endif  // FOTA_TRACE_DBG
-#else  // !FOTA_TRACE_ENABLE
-#include "mbed-trace/mbed_trace.h"
-#ifndef TRACE_GROUP
-#define TRACE_GROUP "FOTA"
-#endif
-#define FOTA_TRACE_DEBUG tr_debug
-#define FOTA_TRACE_INFO  tr_info
-#define FOTA_TRACE_ERROR tr_error
-#endif  // FOTA_TRACE_ENABLE
+#else  // FOTA_TRACE_ENABLE
+#define FOTA_TRACE_DEBUG(fmt, ...)
+#define FOTA_TRACE_INFO(fmt, ...)
+#define FOTA_TRACE_ERROR(fmt, ...)
+#endif  // !FOTA_TRACE_ENABLE
+#endif  // !MBED_CONF_MBED_TRACE_ENABLE
 
 #if FOTA_APP_DEFAULT_CB_NO_PRINT
 #define FOTA_APP_PRINT FOTA_TRACE_INFO
 #else
 #define FOTA_APP_PRINT(fmt, ...)  printf("[FOTA] " fmt "\n", ##__VA_ARGS__)
 #endif
-
 
 #if !defined(FOTA_HALT)
 #define FOTA_HALT for(;;)

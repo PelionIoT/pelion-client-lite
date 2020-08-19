@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -19,6 +19,8 @@
 #include "fota/fota_base.h"
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
+
+#define TRACE_GROUP "FOTA"
 
 #include <stdlib.h>
 #include "mbed-client-libservice/ns_types.h"
@@ -59,44 +61,45 @@ static fota_event_handler_ctx_t g_ctx = { 0 };
 static void event_handler(arm_event_t *event)
 {
     FOTA_TRACE_DEBUG("FOTA event-handler got event [type= %d]", event->event_type);
+
     switch (event->event_type) {
-        case FOTA_EVENT_EXECUTE_WITH_BUFFER: {
-            fota_event_handler_ctx_t *ctx = (fota_event_handler_ctx_t *)event->data_ptr;
-            FOTA_DBG_ASSERT(ctx == &g_ctx);
-            FOTA_DBG_ASSERT(ctx->is_pending_event);
+        case FOTA_EVENT_EXECUTE_WITH_BUFFER:
+        case FOTA_EVENT_EXECUTE_WITH_RESULT:
+            break;
 
-            fota_deferred_data_callabck_t cb = (fota_deferred_data_callabck_t)ctx->cb;
-
-            // backup the pointer as we need it after the callback.
-            // since we are setting ctx->is_pending_event = false - it may be overwritten
-            uint8_t *cb_data = ctx->args.buffer.data;
-            ctx->is_pending_event = false;
-
-            cb(ctx->args.buffer.data, ctx->args.buffer.size);
-            free((void *)cb_data);
-            return;
-        }
-        case FOTA_EVENT_EXECUTE_WITH_RESULT: {
-            fota_event_handler_ctx_t *ctx = (fota_event_handler_ctx_t *)event->data_ptr;
-            FOTA_DBG_ASSERT(ctx == &g_ctx);
-            FOTA_DBG_ASSERT(ctx->is_pending_event);
-
-            ctx->is_pending_event = false;
-            fota_deferred_result_callabck_t cb = (fota_deferred_result_callabck_t)ctx->cb;
-            cb(ctx->args.result.token, ctx->args.result.status);
-            return;
-        }
         case FOTA_EVENT_INIT:
             return; // ignore event - nothing to be done
         default:
             FOTA_DBG_ASSERT(!"Unknown event");
     }
 
+    fota_event_handler_ctx_t *ctx = (fota_event_handler_ctx_t *)event->data_ptr;
+    FOTA_DBG_ASSERT(ctx == &g_ctx);
+    FOTA_DBG_ASSERT(ctx->is_pending_event);
+
+    ctx->is_pending_event = false;
+
+    if (event->event_type == FOTA_EVENT_EXECUTE_WITH_BUFFER) {
+
+        fota_deferred_data_callabck_t cb = (fota_deferred_data_callabck_t)ctx->cb;
+
+        // backup the pointer as we need it after the callback.
+        // since we are setting ctx->is_pending_event = false - it may be overwritten
+        uint8_t *cb_data = ctx->args.buffer.data;
+
+        cb(ctx->args.buffer.data, ctx->args.buffer.size);
+        free((void *)cb_data);
+
+    } else { // FOTA_EVENT_EXECUTE_WITH_RESULT
+
+        fota_deferred_result_callabck_t cb = (fota_deferred_result_callabck_t)ctx->cb;
+        cb(ctx->args.result.token, ctx->args.result.status);
+    }
 }
 
 int fota_event_handler_init(void)
 {
-    FOTA_DBG_ASSERT(!g_ctx.is_pending_event);
+    FOTA_ASSERT(!g_ctx.is_pending_event);
 
     memset(&g_ctx, 0, sizeof(g_ctx));
 
@@ -113,7 +116,7 @@ void fota_event_handler_deinit(void)
     //nothing to de-register - eventOS does not have a method for destroying handlers
 }
 
-void fota_event_handler_defer_with_data(
+int fota_event_handler_defer_with_data(
     fota_deferred_data_callabck_t cb, uint8_t *data, size_t size)
 {
     FOTA_ASSERT(!g_ctx.is_pending_event);
@@ -122,6 +125,10 @@ void fota_event_handler_defer_with_data(
     g_ctx.args.buffer.size = size;
     if (size) {
         uint8_t *tmp_data_ptr = (uint8_t *) malloc(size);
+        if (!tmp_data_ptr) {
+            FOTA_TRACE_ERROR("FOTA tmp_data_ptr - allocation failed");
+            return FOTA_STATUS_OUT_OF_MEMORY;
+        }
         memcpy(tmp_data_ptr, data, size);
         g_ctx.args.buffer.data = tmp_data_ptr;
     } else {
@@ -135,6 +142,7 @@ void fota_event_handler_defer_with_data(
 
     eventOS_event_send_user_allocated(&g_ctx.event_storage);
 
+    return FOTA_STATUS_SUCCESS;
 }
 
 void fota_event_handler_defer_with_result(

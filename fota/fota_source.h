@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -25,12 +25,6 @@
 extern "C" {
 #endif
 
-// Temporary backward compatibility mode - send older version & digest objects
-// until integration with service is over
-#ifndef FOTA_SOURCE_COMPONENT_BACKWARD_COMPATIBILITY_MODE
-#define FOTA_SOURCE_COMPONENT_BACKWARD_COMPATIBILITY_MODE 1
-#endif
-
 typedef enum {
     // Keep values conforming to the openmobile standard (omitting the ones that aren't reported)
     FOTA_SOURCE_STATE_INVALID                           = -1,
@@ -45,14 +39,14 @@ typedef enum {
 
 typedef struct endpoint_s endpoint_t;
 
+void fota_source_set_config(size_t max_frag_size, bool allow_unaligned_fragments);
+
 int fota_source_init(
     endpoint_t *in_endpoint,
     const uint8_t *vendor_id, uint32_t vendor_id_size,
     const uint8_t *class_id, uint32_t class_id_size,
-#if FOTA_SOURCE_COMPONENT_BACKWARD_COMPATIBILITY_MODE
     const uint8_t *curr_fw_digest, uint32_t curr_fw_digest_size,
     uint64_t curr_fw_version,
-#endif
     fota_source_state_e source_state);
 
 int fota_source_add_component(unsigned int comp_id, const char *name, const char *sem_ver);

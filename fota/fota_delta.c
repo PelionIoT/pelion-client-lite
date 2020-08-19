@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2016-2019 ARM Ltd.
+// Copyright 2016-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -19,6 +19,8 @@
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
 
+#define TRACE_GROUP "FOTA"
+
 #if !defined(FOTA_DISABLE_DELTA)
 
 #include "fota/fota_delta.h"
@@ -37,6 +39,7 @@
 #define DBG(fmt, ...)
 #endif
 
+
 typedef struct fota_delta_ctx_s {
     struct bspatch_stream bs_patch_stream;
     // To keep internal state of which bspatch event is currently going to be completed
@@ -46,9 +49,9 @@ typedef struct fota_delta_ctx_s {
     // to keep pointer to buffer bspatch gives us to read_patch function
     void *bspatch_read_patch_buffer_ptr;
     // to keep length what size buffer bspatch gave into read_patch function
-    uint64_t bspatch_read_patch_buffer_length;
+    uint32_t bspatch_read_patch_buffer_length;
     // to keep size how much we have remaining to be consumed from buffer bspatch gave into read_patch function
-    uint64_t bspatch_read_patch_buffer_remaining;
+    uint32_t bspatch_read_patch_buffer_remaining;
     // Pointer to data waiting for BS patch
     const uint8_t *incoming_frag_ptr;
     // Size of data waiting for BS patch
@@ -85,7 +88,7 @@ bs_patch_api_return_code_t original_read(const struct bspatch_stream *stream, vo
  *
  * \return bs_patch_api_return_code_t EBSAPI_OPERATION_DONE_IMMEDIATELY or error code
  */
-bs_patch_api_return_code_t patch_read(const struct bspatch_stream *stream, void *buffer, uint64_t length);
+bs_patch_api_return_code_t read_patch(const struct bspatch_stream *stream, void *buffer, uint32_t length);
 
 /*
   * BsPatch callback function to Seek the original file/image
@@ -131,7 +134,7 @@ int fota_delta_start(fota_delta_ctx_t **ctx, fota_component_curr_fw_read curr_fw
     delta_ctx->incoming_frag_ptr = 0;
     delta_ctx->curr_fw_read = curr_fw_read;
     ARM_BS_Init(&delta_ctx->bs_patch_stream, (void *)delta_ctx,
-                patch_read,
+                read_patch,
                 original_read,
                 original_seek,
                 new_write);
@@ -154,16 +157,20 @@ int fota_delta_new_payload_frag(
     // Copy what we can fit into bspatch read_patch buffer
     if (ctx->next_event_to_post == EBSAPI_READ_PATCH_DONE &&
             ctx->bspatch_read_patch_buffer_remaining > 0 &&
-            ctx->bspatch_read_patch_buffer_remaining <= payload_frag_size) {
+            ctx->bspatch_read_patch_buffer_remaining <= ctx->bspatch_read_patch_buffer_length) {
+        uint32_t incoming_bytes_copy = payload_frag_size < ctx->bspatch_read_patch_buffer_remaining ? payload_frag_size : ctx->bspatch_read_patch_buffer_remaining;
         uint32_t patch_buf_offset = ctx->bspatch_read_patch_buffer_length - ctx->bspatch_read_patch_buffer_remaining;
         memcpy((uint8_t *)(ctx->bspatch_read_patch_buffer_ptr) + (patch_buf_offset),
                payload_frag,
-               ctx->bspatch_read_patch_buffer_remaining);
-        ctx->incoming_frag_ptr_offset += (uint32_t)ctx->bspatch_read_patch_buffer_remaining;
-        ctx->bspatch_read_patch_buffer_remaining = 0;
+               incoming_bytes_copy);
+        ctx->incoming_frag_ptr_offset += incoming_bytes_copy;
+        ctx->bspatch_read_patch_buffer_remaining -= incoming_bytes_copy;
     }
-    int status = do_patching(ctx);
-    return status;
+    if (ctx->bspatch_read_patch_buffer_remaining == 0) {
+        return do_patching(ctx);
+    } else {
+        return FOTA_STATUS_FW_DELTA_REQUIRED_MORE_DATA;
+    }
 }
 
 int fota_delta_get_next_fw_frag(
@@ -218,7 +225,7 @@ int fota_delta_finalize(fota_delta_ctx_t **ctx)
 
         // bspatch read is still waiting for data
         if ((*ctx)->bspatch_read_patch_buffer_remaining > 0) {
-            FOTA_TRACE_ERROR("[DELTA] fota_delta_finalize bspatch read is still waiting for data %" PRIu64 " bytes.", (*ctx)->bspatch_read_patch_buffer_remaining);
+            FOTA_TRACE_ERROR("[DELTA] fota_delta_finalize bspatch read is still waiting for data %" PRIu32 " bytes.", (*ctx)->bspatch_read_patch_buffer_remaining);
             status = FOTA_STATUS_INTERNAL_DELTA_ERROR;
         }
 
@@ -234,11 +241,9 @@ int do_patching(fota_delta_ctx_t *delta_ctx)
     bs_patch_api_return_code_t bs_result = EBSAPI_ERR_INVALID_STATE;
     do {
         bs_result = ARM_BS_ProcessPatchEvent(&delta_ctx->bs_patch_stream, delta_ctx->next_event_to_post);
-        if (bs_result == EBSAPI_PATCH_DONE) {
-            delta_ctx->next_event_to_post = EBSAPI_PATCH_DONE;
-            break;
-        } else if ((bs_result == EBSAPI_OPERATION_NEW_FILE_WRITE_WILL_COMPLETE_LATER) ||
-                   (bs_result == EBSAPI_OPERATION_PATCH_READ_WILL_COMPLETE_LATER)) {
+        if (bs_result == EBSAPI_PATCH_DONE ||
+                bs_result == EBSAPI_OPERATION_NEW_FILE_WRITE_WILL_COMPLETE_LATER ||
+                bs_result == EBSAPI_OPERATION_PATCH_READ_WILL_COMPLETE_LATER) {
             break;
         } else if (bs_result < EBSAPI_OPERATION_DONE_IMMEDIATELY) {  // for all the failure error codes
             DBG("[DELTA] ARM_BS_ProcessPatchEvent() = %d.", bs_result);
@@ -253,13 +258,13 @@ int do_patching(fota_delta_ctx_t *delta_ctx)
     return FOTA_STATUS_SUCCESS;
 }
 
-bs_patch_api_return_code_t patch_read(
+bs_patch_api_return_code_t read_patch(
     const struct bspatch_stream *stream,
     void *buffer,
-    uint64_t length)
+    uint32_t length)
 {
     bs_patch_api_return_code_t return_code = EBSAPI_ERR_UNEXPECTED_EVENT;
-    uint64_t copy_amount = 0;
+    uint32_t copy_amount = 0;
     fota_delta_ctx_t *delta_ctx = (fota_delta_ctx_t *)stream->opaque;
     FOTA_DBG_ASSERT(delta_ctx);
     delta_ctx->bspatch_read_patch_buffer_ptr = buffer;
@@ -270,12 +275,12 @@ bs_patch_api_return_code_t patch_read(
     if (length > (delta_ctx->incoming_frag_size - delta_ctx->incoming_frag_ptr_offset)) {
         // We need to signal main bspatch-loop we have (in Write?)
         // to break so that we can get more patch data in.
-        DBG("[DELTA] patch_read(length=%" PRIu64 ")=EBSAPI_OPERATION_PATCH_READ_WILL_COMPLETE_LATER", length);
+        DBG("[DELTA] read_patch(length=%" PRIu32 ") EBSAPI_OPERATION_PATCH_READ_WILL_COMPLETE_LATER", length);
         copy_amount = (uint64_t)(delta_ctx->incoming_frag_size - delta_ctx->incoming_frag_ptr_offset);
         return_code = EBSAPI_OPERATION_PATCH_READ_WILL_COMPLETE_LATER;
 
     } else {
-        DBG("[DELTA] patch_read(length=%" PRIu64 ")=EBSAPI_OPERATION_DONE_IMMEDIATELY", length);
+        DBG("[DELTA] read_patch(length=%" PRIu32 ") EBSAPI_OPERATION_DONE_IMMEDIATELY", length);
         copy_amount = length;
         return_code = EBSAPI_OPERATION_DONE_IMMEDIATELY;
     }

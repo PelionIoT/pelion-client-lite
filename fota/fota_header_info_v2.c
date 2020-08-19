@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -18,6 +18,8 @@
 #include "fota/fota_base.h"
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
+
+#define TRACE_GROUP "FOTA"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -38,14 +40,12 @@
 #define ARM_UC_FIRMWARE_SIZE_OFFSET_V2    (16)
 #define ARM_UC_FIRMWARE_HASH_OFFSET_V2    (24)
 
-#define ARM_UC_HEADER_MAGIC_V2_EXTERNAL            (0x5a51b3d4UL)
 #define ARM_UC_PAYLOAD_SIZE_OFFSET_V2_EXTERNAL     (88)
 #define ARM_UC_PAYLOAD_HASH_OFFSET_V2_EXTERNAL     (96)
 #define ARM_UC_CAMPAIGN_OFFSET_V2_EXTERNAL         (160)
 #define ARM_UC_HMAC_OFFSET_V2_EXTERNAL             (232)
 #define ARM_UC_HEADER_SIZE_V2_EXTERNAL             (296)
 
-#define ARM_UC_HEADER_MAGIC_V2_INTERNAL            (0x5a51b3d4UL)
 #define ARM_UC_CAMPAIGN_OFFSET_V2_INTERNAL         (88)
 #define ARM_UC_SIGNATURE_SIZE_OFFSET_V2_INTERNAL   (104)
 #define ARM_UC_HEADER_CRC_OFFSET_V2_INTERNAL       (108)
@@ -359,26 +359,6 @@ int fota_deserialize_header(const uint8_t *buffer, size_t buffer_size, fota_head
 #endif
 
 }
-
-size_t fota_get_header_size()
-{
-#if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_EXTERNAL == 1)
-    return ARM_UC_HEADER_SIZE_V2_EXTERNAL;
-#else
-    return ARM_UC_HEADER_SIZE_V2_INTERNAL;
-#endif
-}
-
-void fota_set_header_info_magic(fota_header_info_t *header_info)
-{
-    FOTA_DBG_ASSERT(header_info);
-#if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_EXTERNAL == 1)
-    header_info->magic = ARM_UC_HEADER_MAGIC_V2_EXTERNAL;
-#else
-    header_info->magic = ARM_UC_HEADER_MAGIC_V2_INTERNAL;
-#endif
-}
-
 
 #endif
 

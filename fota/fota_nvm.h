@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -52,6 +52,7 @@ int fota_nvm_get_class_id(uint8_t buffer[FOTA_GUID_SIZE]);
  */
 int fota_nvm_get_vendor_id(uint8_t buffer[FOTA_GUID_SIZE]);
 
+#if defined(FOTA_USE_UPDATE_X509)
 /*
  * Get FOTA certificate from storage.
  *
@@ -62,6 +63,11 @@ int fota_nvm_get_vendor_id(uint8_t buffer[FOTA_GUID_SIZE]);
  * \return FOTA_STATUS_SUCCESS on success.
  */
 int fota_nvm_get_update_certificate(uint8_t *buffer, size_t size, size_t *bytes_read);
+#endif  // defined(FOTA_USE_UPDATE_X509)
+
+#if defined(FOTA_USE_UPDATE_RAW_PUBLIC_KEY)
+int fota_nvm_get_update_public_key(uint8_t buffer[FOTA_UPDATE_RAW_PUBLIC_KEY_SIZE]);
+#endif  // defined(FOTA_USE_UPDATE_RAW_PUBLIC_KEY)
 
 /*
  * Get firmware encryption key from storage.
@@ -80,32 +86,11 @@ int fota_nvm_fw_encryption_key_get(uint8_t buffer[FOTA_ENCRYPT_KEY_SIZE]);
 int fota_nvm_fw_encryption_key_set(const uint8_t buffer[FOTA_ENCRYPT_KEY_SIZE]);
 
 /*
- * Get salt used for generating FW candidate encryption key.
+ * Delete firmware encryption key in storage.
  *
- * \param[out] buffer buffer for returning salt.
-
- * \return FOTA_STATUS_SUCCESS on success.
- * \note buffer size expected to of the following size: FOTA_ENCRYPT_METADATA_SALT_LEN
- */
-int fota_nvm_salt_get(uint8_t buffer[FOTA_ENCRYPT_METADATA_SALT_LEN]);
-
-/*
- * Save salt used for generating FW candidate encryption key.
- *
- * \param[in] buffer buffer with salt.
-
  * \return FOTA_STATUS_SUCCESS on success
- * \note buffer size expected to of the following size: FOTA_ENCRYPT_METADATA_SALT_LEN
  */
-int fota_nvm_salt_set(const uint8_t buffer[FOTA_ENCRYPT_METADATA_SALT_LEN]);
-
-/*
- * Delete salt used for generating FW candidate encryption key.
- *
- * \return FOTA_STATUS_SUCCESS on success.
- */
-int fota_nvm_salt_delete(void);
-
+int fota_nvm_fw_encryption_key_delete(void);
 
 /**
  * Get saved Pelion FOTA manifest.
@@ -137,14 +122,14 @@ int fota_nvm_manifest_set(const uint8_t *buffer, size_t size);
 
 int fota_nvm_manifest_delete(void);
 
-#ifdef MBED_CLOUD_DEV_UPDATE_ID
+#if defined(MBED_CLOUD_DEV_UPDATE_ID)
 
 int fota_nvm_update_class_id_set(void);
 int fota_nvm_update_vendor_id_set(void);
 
 #endif
 
-#ifdef MBED_CLOUD_DEV_UPDATE_CERT
+#if defined(MBED_CLOUD_DEV_UPDATE_CERT)
 
 int fota_nvm_update_cert_set(void);
 
@@ -170,6 +155,9 @@ int fota_nvm_comp_version_set(const char *comp_name, fota_component_version_t ve
  */
 int fota_nvm_comp_version_get(const char *comp_name, fota_component_version_t *version);
 
+#if defined(MBED_CLOUD_DEV_UPDATE_RAW_PUBLIC_KEY)
+int fota_nvm_set_update_public_key(void);
+#endif
 
 #ifdef __cplusplus
 }

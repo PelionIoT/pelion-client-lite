@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -20,14 +20,15 @@
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
 
+#define TRACE_GROUP "FOTA"
+
 #include "fota/fota_curr_fw.h"
 #include "fota/fota_status.h"
 #include <stdio.h>
 
-// Bootloader and application have different defines
-
+#if !defined(FOTA_CUSTOM_CURR_FW_STRUCTURE) || (!FOTA_CUSTOM_CURR_FW_STRUCTURE)
 #if defined(__MBED__)
-
+// Bootloader and application have different defines
 #if !defined(APPLICATION_ADDR)
 #if defined(MBED_CONF_MBED_BOOTLOADER_APPLICATION_START_ADDRESS)
 #define APPLICATION_ADDR MBED_CONF_MBED_BOOTLOADER_APPLICATION_START_ADDRESS
@@ -36,7 +37,7 @@
 #else
 #error Application start address not defined
 #endif
-#endif
+#endif  // !defined(APPLICATION_ADDR)
 
 #if !defined(HEADER_ADDR)
 #if defined(MBED_CONF_MBED_BOOTLOADER_APPLICATION_HEADER_ADDRESS)
@@ -46,14 +47,8 @@
 #else
 #error Header start address not defined
 #endif
-#endif
+#endif  // !defined(HEADER_ADDR)
 
-#endif // defined(__MBED__)
-
-
-#if !defined(FOTA_CUSTOM_CURR_FW_STRUCTURE) || (!FOTA_CUSTOM_CURR_FW_STRUCTURE)
-
-#if defined(__MBED__)
 
 // The following two functions should be overridden in the non mbed-os cases.
 uint8_t *fota_curr_fw_get_app_start_addr(void)
@@ -80,12 +75,6 @@ uint8_t *fota_curr_fw_get_app_header_addr(void)
 
 #endif // defined(__MBED__)
 
-int fota_curr_fw_read_header(fota_header_info_t *header_info)
-{
-    uint8_t *header_in_curr_fw = (uint8_t *) fota_curr_fw_get_app_header_addr();
-    return fota_deserialize_header(header_in_curr_fw, fota_get_header_size(), header_info);
-}
-
 int fota_curr_fw_read(uint8_t *buf, uint32_t offset, uint32_t size, uint32_t *num_read)
 {
     fota_header_info_t header_info;
@@ -108,6 +97,18 @@ int fota_curr_fw_read(uint8_t *buf, uint32_t offset, uint32_t size, uint32_t *nu
     memcpy(buf, fota_curr_fw_get_app_start_addr() + offset, *num_read);
     return FOTA_STATUS_SUCCESS;
 
+}
+
+int fota_curr_fw_get_digest(uint8_t *buf)
+{
+    fota_header_info_t curr_fw_info;
+    int ret = fota_curr_fw_read_header(&curr_fw_info);
+    if (ret) {
+        FOTA_TRACE_ERROR("Failed to read current header");
+        return ret;
+    }
+    memcpy(buf, curr_fw_info.digest, FOTA_CRYPTO_HASH_SIZE);
+    return FOTA_STATUS_SUCCESS;
 }
 
 #endif // !defined(FOTA_CUSTOM_CURR_FW_STRUCTURE) || (!FOTA_CUSTOM_CURR_FW_STRUCTURE)

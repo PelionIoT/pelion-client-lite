@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -46,9 +46,9 @@ void fota_event_handler_deinit(void);
  * /param cb[in] callback function pointer to be deferred
  * /param data[in] deferred callback input data pointer
  * /param size[in] deferred callback input data size
- *
+ * \return FOTA_STATUS_SUCCESS on success.
  */
-void fota_event_handler_defer_with_data(
+int fota_event_handler_defer_with_data(
     fota_deferred_data_callabck_t cb, uint8_t *data, size_t size);
 
 /*

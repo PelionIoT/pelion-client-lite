@@ -45,7 +45,11 @@ static const struct protoman_layer_callbacks_s callbacks = {
 
 void protoman_add_layer_null(struct protoman_s *protoman, struct protoman_layer_s *layer)
 {
+#ifdef MBED_CONF_MBED_TRACE_ENABLE
     layer->name = "NULL"; // must be set before first print from this layer
+#else
+    layer->name = NULL;
+#endif
 
     protoman_debug("");
 

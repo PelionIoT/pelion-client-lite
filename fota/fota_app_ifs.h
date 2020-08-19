@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -50,7 +50,7 @@ typedef enum {
  *      Update will be restarted on next boot. Alternatively update can be restarted by calling fota_app_resume().
  *
  * \note only required if MBED_CLOUD_CLIENT_FOTA_ENABLE build flag is specified
- *
+ * \note the FW versions in this callback are in internal library format and should be converted to string using fota_component_version_int_to_semver() before use.
  * \param[in] token callback token The token is expected to be passed to fota_app_authorize() or fota_app_reject()
  * \param[in] candidate_info update candidate descriptor
  * \param[in] curr_fw_version current component FW version
@@ -95,7 +95,7 @@ int fota_app_on_complete(int32_t status);
  * Resume Pelion FOTA update.
  *
  * In case update process was interupted - application can restart it by calling this function.
- */
+  */
 void fota_app_resume(void);
 
 /**

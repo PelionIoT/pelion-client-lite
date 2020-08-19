@@ -16,7 +16,7 @@
 
 #include "lwm2m_constants.h"
 #include "lwm2m_endpoint.h"
-#include "lwm2m_get_req_handler.h"
+#include "lwm2m_req_handler.h"
 #include "lwm2m_interface.h"
 #include "lwm2m_registry.h"
 #include "lwm2m_registry_handler.h"
@@ -45,7 +45,14 @@
 
 #define REREGISTRATION_INTERVAL 70 // Percents of end point lifetime, re-registration interval = end point lifetime * (REREGISTRATION_INTERVAL / 100) s.
 
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+static const char *lifetime_res_id = "/1/0/1";
+static const char *binding_res_id = "/1/0/7";
+static const char *reg_update_res_id = "/1/0/8";
+#endif
+
 static void lwm2m_interface_notify_observer(lwm2m_interface_t *interface, lwm2m_interface_observer_event_t event_id, lwm2m_interface_error_t event_type);
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static registry_status_t lwm2m_interface_registration_update_cb(registry_callback_type_t cb_type,
                                                          const registry_path_t *path,
                                                          const registry_callback_token_t *cb_token,
@@ -54,6 +61,8 @@ static registry_status_t lwm2m_interface_registration_update_cb(registry_callbac
                                                          registry_t *registry);
 
 static bool lwm2m_interface_set_registration_update_cb(lwm2m_interface_t *interface, registry_callback_t callback);
+#endif
+
 static bool lwm2m_interface_reset_timer(lwm2m_interface_t *interface, int8_t timer, int8_t tasklet_id, int32_t time_ms);
 static lwm2m_interface_error_t lwm2m_interface_convert_protoman_to_client_error(int protoman_error);
 
@@ -337,7 +346,7 @@ static void lwm2m_interface_endpoint_event_handler(arm_event_t *event)
         case ENDPOINT_EVENT_DEREGISTERED:
 
             tr_info("interface_event_handler ENDPOINT_EVENT_DEREGISTERED");
-            get_handler_free_get_request_list(NULL, true, ERROR_NOT_REGISTERED);
+            req_handler_free_request_list(NULL, true, ERROR_NOT_REGISTERED);
             lwm2m_interface_client_unregistered(interface);
             break;
 
@@ -376,7 +385,7 @@ static void lwm2m_interface_endpoint_event_handler(arm_event_t *event)
         case ENDPOINT_EVENT_ERROR_DEREGISTER:
 
             tr_warn("interface_event_handler ENDPOINT_EVENT_ERROR_DEREGISTER");
-            get_handler_free_get_request_list(NULL, true, ERROR_NOT_REGISTERED);
+            req_handler_free_request_list(NULL, true, ERROR_NOT_REGISTERED);
             lwm2m_interface_registration_error(interface, LWM2M_INTERFACE_ERROR_UNREGISTRATION_FAILED);
             break;
 
@@ -481,6 +490,39 @@ static void lwm2m_interface_connection_event_handler(connection_event_t event, v
     }
 }
 
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+static int get_server_object_resources(endpoint_t *endpoint, register_resource_t **res)
+{
+    register_resource_t *curr;
+    const char *binding_mode = NULL;
+
+    curr = endpoint_create_register_resource_int(endpoint, lifetime_res_id, false, endpoint->lifetime);
+    *res = curr;
+    if (!curr) {
+        return -1;
+    }
+
+    if (endpoint->mode == BINDING_MODE_Q) {
+        binding_mode = BINDING_MODE_UDP_QUEUE;
+    } else {
+        binding_mode = BINDING_MODE_UDP;
+    }
+    curr->next = endpoint_create_register_resource_str(endpoint, binding_res_id, false, (uint8_t *)binding_mode, strlen(binding_mode));
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+
+    curr->next = endpoint_create_register_resource(endpoint, reg_update_res_id, false);
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+
+    return 0;
+}
+#endif
+
 void lwm2m_interface_init(lwm2m_interface_t *interface,
                           const uint16_t listen_port,
                           oma_lwm2m_binding_and_mode_t mode,
@@ -523,6 +565,17 @@ void lwm2m_interface_init(lwm2m_interface_t *interface,
                       (void *)interface,
                       (oma_lwm2m_binding_and_mode_t)(interface->binding_mode),
                       0);
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    // The server object won't handle any coap requests, but needs to be registered because of the res_cb
+    object_handler_t *handler = endpoint_allocate_object_handler(M2M_SERVER_ID, get_server_object_resources, NULL, NULL);
+    if (!handler) {
+        tr_error("lwm2m_interface_init() failed to allocate object handler");
+        assert(handler); // if this happens it's a fatal error
+        return;
+    }
+    endpoint_register_object_handler(&interface->endpoint, handler);
+#endif
 }
 
 bool lwm2m_interface_setup(lwm2m_interface_t *interface,
@@ -634,9 +687,11 @@ bool lwm2m_interface_create_endpoint(lwm2m_interface_t *interface,
         return false;
     }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     if (!lwm2m_interface_set_registration_update_cb(interface, lwm2m_interface_registration_update_cb)) {
         return false;
     }
+#endif
 
     bool endpoint_correct = endpoint_set_parameters(&interface->endpoint, type, life_time);
 
@@ -653,6 +708,7 @@ bool lwm2m_interface_send_update_registration(lwm2m_interface_t *interface)
     return (ENDPOINT_STATUS_OK == endpoint_update_registration(&interface->endpoint));
 }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static registry_status_t lwm2m_interface_registration_update_cb(registry_callback_type_t cb_type,
                                                          const registry_path_t *path,
                                                          const registry_callback_token_t *cb_token,
@@ -687,6 +743,7 @@ bool lwm2m_interface_set_registration_update_cb(lwm2m_interface_t *interface, re
     }
     return true;
 }
+#endif
 
 static void lwm2m_interface_stop_timers(const int8_t event_handler_id)
 {
@@ -763,6 +820,10 @@ void lwm2m_interface_clean(lwm2m_interface_t *interface)
     lwm2m_interface_stop_timers(interface->event_handler_id);
 
     interface->observer = NULL;
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    endpoint_remove_object_handler(&interface->endpoint, M2M_SERVER_ID);
+#endif
 
     connection_destroy(&interface->connection);
     endpoint_destroy(&interface->endpoint);
@@ -1226,9 +1287,9 @@ static void lwm2m_interface_timer_expired(lwm2m_interface_t *interface, lwm2m_in
 #ifdef ENABLE_RESENDINGS
         queue_size = ns_list_count(&interface->endpoint.coap->linked_list_resent_msgs);
 #endif
-        if (queue_size > 0 || interface->reconnecting) {
+        if (queue_size > 0 || interface->reconnecting || !interface->bootstrapped) {
 
-            tr_debug("lwm2m_interface_timer_expired() - RESEND queue not empty or reconnection ongoing, continue sleep timer");
+            tr_debug("lwm2m_interface_timer_expired() - RESEND queue not empty, or reconnection or bootstrap ongoing, continue sleep timer");
             lwm2m_interface_reset_timer(interface,
                                         LWM2M_INTERFACE_TIMER_QUEUE_SLEEP,
                                         interface->event_handler_id,
@@ -1285,7 +1346,9 @@ static void lwm2m_interface_state_bootstrap_or_register(lwm2m_interface_t *inter
     } else {
         tr_debug("lwm2m_interface_state_bootstrap_or_register() in register sequence");
         interface->listen_port = 0;
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
         storage_set_credentials(&interface->endpoint.registry);
+#endif
     }
 
     full_server_address_end = storage_read_uri(full_server_address, &full_server_address_size, bootstrap);
@@ -1553,7 +1616,7 @@ static void lwm2m_interface_state_registered(lwm2m_interface_t *interface, lwm2m
 
         // Find the string following the second "/" character in the endpoint location-path
         // The format should be "rd/<aid>/<iep>"
-        while (iep = strstr(iep, "/")) {
+        while ((iep = strstr(iep, "/"))) {
             iep++;
             if (++count == 2) {
                 break;
@@ -2015,7 +2078,7 @@ void lwm2m_interface_get_data_request(lwm2m_interface_t *interface,
     }
 
     if (uri) {
-        get_handler_send_get_data_request(&interface->endpoint, type, uri, offset, async, data_cb, error_cb, context);
+        req_handler_send_data_request(&interface->endpoint, type, COAP_MSG_CODE_REQUEST_GET, uri, offset, async, data_cb, error_cb, context, NULL, 0);
     } else {
         error_cb(error, context);
     }
