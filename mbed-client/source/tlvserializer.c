@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+
 #include "tlvserializer.h"
 #include "lwm2m_heap.h"
 #include "lwm2m_registry.h"
@@ -1544,3 +1546,5 @@ registry_tlv_serialize_status_t registry_deserialize_text_resource_instance(regi
 }
 
 #endif // MBED_CLIENT_ENABLE_DESERIALIZE_PLAINTEXT
+
+#endif // !defined(MBED_CLOUD_CLIENT_DISABLE_REGISTRY)

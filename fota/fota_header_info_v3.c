@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -19,20 +19,17 @@
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
 
-#include <stddef.h>
-#include <stdio.h>
-#include <stdbool.h>
-#include <inttypes.h>
-#include "fota/fota_header_info.h"
-#include "fota/fota_status.h"
+#define TRACE_GROUP "FOTA"
 
+#include "fota/fota_header_info.h"
+#include <string.h>
 
 #if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION == 3)
 
 int fota_deserialize_header(const uint8_t *buffer, size_t buffer_size, fota_header_info_t *header_info)
 {
     FOTA_DBG_ASSERT(sizeof(*header_info) <= buffer_size);
-    memcpy(header_info, buffer, buffer_size);
+    memcpy(header_info, buffer, sizeof(*header_info));
     if (header_info->magic != FOTA_FW_HEADER_MAGIC) {
         FOTA_TRACE_ERROR("Invalid header in current installed firmware");
         return FOTA_STATUS_INTERNAL_ERROR;
@@ -41,7 +38,10 @@ int fota_deserialize_header(const uint8_t *buffer, size_t buffer_size, fota_head
     return FOTA_STATUS_SUCCESS;
 }
 
-int fota_serialize_header(const fota_header_info_t *header_info, uint8_t *header_buf, size_t header_buf_size, size_t *header_buf_actual_size)
+int fota_serialize_header(const fota_header_info_t *header_info,
+                          uint8_t *header_buf,
+                          size_t header_buf_size,
+                          size_t *header_buf_actual_size)
 {
     FOTA_DBG_ASSERT(sizeof(*header_info) <= header_buf_size);
     memcpy(header_buf, header_info, sizeof(*header_info));
@@ -50,17 +50,5 @@ int fota_serialize_header(const fota_header_info_t *header_info, uint8_t *header
     return FOTA_STATUS_SUCCESS;
 }
 
-size_t fota_get_header_size(void)
-{
-    return sizeof(fota_header_info_t);
-}
-
-void fota_set_header_info_magic(fota_header_info_t *header_info)
-{
-    FOTA_DBG_ASSERT(header_info);
-    header_info->magic = FOTA_FW_HEADER_MAGIC;
-}
-
-#endif
-
-#endif  // MBED_CLOUD_CLIENT_FOTA_ENABLE
+#endif // MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION == 3
+#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE

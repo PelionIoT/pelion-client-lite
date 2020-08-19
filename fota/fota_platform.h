@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -20,18 +20,77 @@
 #define __FOTA_PLATFORM_H_
 
 #include "fota/fota_base.h"
+#include "fota/fota_status.h"
+#include "fota/fota_block_device.h"
+#include "fota/fota_candidate.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+
+#if defined(FOTA_CUSTOM_PLATFORM) && (FOTA_CUSTOM_PLATFORM)
+
+// Hooks that need to be supplied by platform specific code
+
+/**
+ * Platform init hook, called at FOTA module initialization.
+ *
+ * \param[in] after_upgrade Indicates that hook was called after an upgrade.
+ * \return FOTA_STATUS_SUCCESS on success.
+ */
 int fota_platform_init_hook(bool after_upgrade);
 
+/**
+ * Platform start update hook, called when update is started.
+ *
+ * \param[in] comp_name Component name.
+ * \return FOTA_STATUS_SUCCESS on success.
+ */
 int fota_platform_start_update_hook(const char *comp_name);
 
+/**
+ * Platform finish update hook, called when update is finished.
+ *
+ * \param[in] comp_name Component name.
+ * \return FOTA_STATUS_SUCCESS on success.
+ */
 int fota_platform_finish_update_hook(const char *comp_name);
 
+/**
+ * Platform start update hook, called when update is aborted.
+ *
+ * \param[in] comp_name Component name.
+ * \return FOTA_STATUS_SUCCESS on success.
+ */
 int fota_platform_abort_update_hook(const char *comp_name);
+
+#else
+
+#ifdef __MBED__
+// Default platform hooks
+static inline int fota_platform_init_hook(bool after_upgrade)
+{
+    return FOTA_STATUS_SUCCESS;
+}
+#endif
+
+static inline int fota_platform_start_update_hook(const char *comp_name)
+{
+    return FOTA_STATUS_SUCCESS;
+}
+
+static inline int fota_platform_finish_update_hook(const char *comp_name)
+{
+    return FOTA_STATUS_SUCCESS;
+}
+
+static inline int fota_platform_abort_update_hook(const char *comp_name)
+{
+    return FOTA_STATUS_SUCCESS;
+}
+
+#endif // !defined(FOTA_CUSTOM_PLATFORM) || (!FOTA_CUSTOM_PLATFORM)
 
 #ifdef __cplusplus
 }

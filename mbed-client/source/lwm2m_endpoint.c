@@ -20,7 +20,7 @@
 #include "mbed-client/lwm2m_connection.h"
 #include "mbed-client/lwm2m_constants.h"
 #include "mbed-client/lwm2m_endpoint.h"
-#include "mbed-client/lwm2m_get_req_handler.h"
+#include "mbed-client/lwm2m_req_handler.h"
 #include "mbed-client/lwm2m_heap.h"
 #include "mbed-client/lwm2m_notifier.h"
 #include "mbed-client/lwm2m_registry.h"
@@ -32,6 +32,9 @@
 #include "token_generator.h"
 #include "common_functions.h"
 #include "mbed-coap/sn_coap_protocol.h"
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+#include "sn_coap_protocol_internal.h"
+#endif
 #include "mbedtls/base64.h"
 
 #include <assert.h>
@@ -41,7 +44,7 @@
 
 #define TRACE_GROUP "lwEP"
 
-static const char MCC_VERSION[] = "mccv=1.1.1-lite";
+static const char MCC_VERSION[] = "mccv=1.2.0-lite";
 
 static const char ep_name_parameter[]  = "ep="; /* Endpoint name. A unique name for the registering node in a domain.  */
 static const uint8_t resource_path[] = {'r', 'd'}; /* For resource directory */
@@ -71,7 +74,9 @@ static int endpoint_send_pending_message(endpoint_t *endpoint);
 static int endpoint_internal_coap_send(endpoint_t *endpoint, sn_coap_hdr_s *coap_header_ptr, sn_nsdl_addr_s *dst_addr_ptr, uint8_t message_description);
 
 // if bootstrap server has not set the transport binding, we set the default value through this function
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static int endpoint_reset_binding_mode(registry_t *registry, const oma_lwm2m_binding_and_mode_t mode);
+#endif
 
 #ifndef SN_COAP_DISABLE_RESENDINGS
 static int endpoint_set_retransmission_parameters(endpoint_t *endpoint);
@@ -80,16 +85,23 @@ static int endpoint_set_retransmission_parameters(endpoint_t *endpoint);
 static uint8_t* write_char(uint8_t *data, const char character, int32_t *len);
 static uint8_t* write_int(uint8_t *data, uint32_t value, int32_t *len);
 static uint8_t* write_data(uint8_t *to, const char *from, uint16_t len, int32_t *packet_len);
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+static uint8_t *write_resource(uint8_t *data, register_resource_t *iter, int32_t *len);
+#endif
 static uint8_t *write_string(uint8_t *to, const char *from, int32_t *packet_len);
 static uint8_t *write_string_pair(uint8_t *to, const char *from1, const char *from2, int32_t *packet_len);
 static uint8_t *write_parameter(uint8_t *packet, const char *parameter, uint8_t parameter_len, const char *value, uint16_t value_len, uint8_t no_value, int32_t *packet_len);
 #if MBED_CLIENT_ENABLE_PUBLISH_RESOURCE_VALUE_IN_REG_MSG
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static uint8_t *write_resource_value(uint8_t *packet, const registry_path_t *path, int32_t *packet_len, const endpoint_t *endpoint);
+#endif
 #endif
 #ifdef MBED_CONF_MBED_CLIENT_REGISTER_RESOURCE_NAME
 static uint8_t *write_resource_name(uint8_t *packet, const registry_path_t *path, int32_t *packet_len);
 #endif
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static uint8_t *write_path(uint8_t *packet, const registry_path_t *path, int32_t *packet_len);
+#endif
 static uint8_t *write_query_parameters(uint8_t *dest, const char *uri_query_parameters, int32_t *packet_len);
 static uint8_t *write_uri_query_options(uint8_t *temp_ptr, const endpoint_t *endpoint,
                                      bool update,
@@ -123,8 +135,13 @@ static int8_t endpoint_rx_function(sn_coap_hdr_s *coap_packet_ptr, sn_nsdl_addr_
 static void* lwm2m_alloc_uint16(uint16_t size);
 static void endpoint_coap_timer(void *ep);
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static size_t endpoint_itoa_len(uint32_t value);
 static uint8_t *endpoint_itoa(uint8_t *ptr, uint32_t value);
+#else
+static size_t endpoint_itoa_len(int64_t value);
+static uint8_t *endpoint_itoa(uint8_t *ptr, int64_t value);
+#endif
 static int get_nsdl_address(const endpoint_t *endpoint, sn_nsdl_addr_s *address);
 #if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
 static void endpoint_request_coap_ping(endpoint_t *endpoint);
@@ -170,14 +187,24 @@ void endpoint_init(endpoint_t *endpoint, connection_t *connection,
     endpoint->next_coap_ping_send_time = 0;
 #endif
 
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    endpoint->object_handlers = NULL;
+    endpoint->auto_obs_token = 0;
+    endpoint->lifetime = 0;
+    endpoint->security_mode = 0;
+    endpoint->server_uri = NULL;
+#endif
+
     endpoint->message_type = ENDPOINT_MSG_UNDEFINED;
     endpoint->last_message_type = ENDPOINT_MSG_UNDEFINED;
 
     endpoint->confirmable_response = (endpoint_confirmable_response_t) {{0}};
 
     send_queue_init(&endpoint->send_queue);
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     registry_init(&endpoint->registry, &endpoint->notifier);
     notifier_init(&endpoint->notifier, endpoint);
+#endif
 }
 
 int endpoint_setup(endpoint_t *endpoint, int8_t event_handler_id)
@@ -204,22 +231,28 @@ int endpoint_setup(endpoint_t *endpoint, int8_t event_handler_id)
 #endif
 
     // TODO: rename this to a setup and make it return status
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     callback_handler_init(&endpoint->registry);
 
     if (ENDPOINT_STATUS_OK != endpoint_reset_binding_mode(&endpoint->registry, endpoint->mode)) {
         sn_coap_protocol_destroy(endpoint->coap);
         return ENDPOINT_STATUS_ERROR;
     }
+#else
+    callback_handler_init(endpoint);
+#endif
 
     if (ENDPOINT_STATUS_OK != endpoint_set_lifetime(endpoint, 0)) {
         sn_coap_protocol_destroy(endpoint->coap);
         return ENDPOINT_STATUS_ERROR;
     }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     if (notifier_setup(&endpoint->notifier) == false) {
         sn_coap_protocol_destroy(endpoint->coap);
         return ENDPOINT_STATUS_ERROR;
     }
+#endif
 
     return ENDPOINT_STATUS_OK;
 }
@@ -239,11 +272,13 @@ void endpoint_stop(endpoint_t *endpoint)
     endpoint->confirmable_response.pending = false;
     endpoint->confirmable_response.msg_id = 0;
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     // This clears notifier states and continues after reconnection.
     notifier_continue(&endpoint->notifier);
+#endif
 
     // Set resend flag to GET requests
-    get_handler_set_resend_status();
+    req_handler_set_resend_status();
 
     // Request runtime for GET handler to continue later if required.
     send_queue_request(endpoint, SEND_QUEUE_REQUEST);
@@ -266,11 +301,15 @@ void endpoint_destroy(endpoint_t *endpoint)
 
     endpoint->coap = NULL;
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     notifier_stop(&endpoint->notifier);
+#endif
 
-    get_handler_destroy();
+    req_handler_destroy();
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     registry_destroy(&endpoint->registry);
+#endif
 
     lwm2m_free(endpoint->location);
 
@@ -283,6 +322,16 @@ void endpoint_destroy(endpoint_t *endpoint)
     if (!endpoint->free_parameters) {
         return;
     }
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    while (endpoint->object_handlers) {
+        object_handler_t *rest = endpoint->object_handlers->next;
+        lwm2m_free(endpoint->object_handlers);
+        endpoint->object_handlers = rest;
+    }
+
+    lwm2m_free(endpoint->server_uri);
+#endif
 
     lwm2m_free((void*)endpoint->type);
 }
@@ -310,10 +359,11 @@ bool endpoint_set_parameters(endpoint_t *endpoint, const char *type, int32_t lif
     return validate_parameters(endpoint);
 }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 int endpoint_reset_binding_mode(registry_t *registry, const oma_lwm2m_binding_and_mode_t mode) {
 
     registry_path_t binding_path;
-    registry_set_path(&binding_path, 1, 0, SERVER_BINDING, 0, REGISTRY_PATH_RESOURCE);
+    registry_set_path(&binding_path, M2M_SERVER_ID, 0, SERVER_BINDING, 0, REGISTRY_PATH_RESOURCE);
     bool empty;
     registry_status_t status = registry_is_value_empty(registry, &binding_path, &empty);
 
@@ -356,6 +406,7 @@ int endpoint_reset_binding_mode(registry_t *registry, const oma_lwm2m_binding_an
 
     return ENDPOINT_STATUS_OK;
 }
+#endif
 
 static int get_nsdl_address(const endpoint_t *endpoint, sn_nsdl_addr_s *address)
 {
@@ -425,10 +476,11 @@ static int endpoint_send_pending_message(endpoint_t *endpoint)
 
         tr_debug("read_query_parameters params %s", uri_query_params);
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
         if (ENDPOINT_STATUS_OK != endpoint_reset_binding_mode(&endpoint->registry, endpoint->mode)) {
             return ENDPOINT_STATUS_ERROR;
         }
-
+#endif
     }
 
     if (ENDPOINT_STATUS_OK != get_nsdl_address(endpoint, &address)) {
@@ -722,12 +774,12 @@ int endpoint_send_coap_message(endpoint_t *endpoint, sn_nsdl_addr_s *address_ptr
     }
 
     /* Build CoAP message */
-    int status = sn_coap_protocol_build(endpoint->coap, address_ptr, message_ptr, coap_hdr_ptr, (void *)endpoint);
+    int coap_length = sn_coap_protocol_build(endpoint->coap, address_ptr, message_ptr, coap_hdr_ptr, (void *)endpoint);
     int return_value = ENDPOINT_STATUS_ERROR;
-    if (status == -2) {
+    if (coap_length == -2) {
         return_value = ENDPOINT_STATUS_ERROR_MEMORY_FAILED;
     }
-    if ( status < 0) {
+    if ( coap_length < 0) {
         lwm2m_free(message_ptr);
         message_ptr = 0;
         tr_error("endpoint_send_coap_message sn_coap_protocol_build failed. Failure reason %d", return_value);
@@ -754,7 +806,7 @@ int endpoint_send_coap_message(endpoint_t *endpoint, sn_nsdl_addr_s *address_ptr
     printf("\n");
 #endif
 
-    ret_val = connection_send_data(endpoint->connection, message_ptr, message_len, true);
+    ret_val = connection_send_data(endpoint->connection, message_ptr, coap_length, true);
     if (ret_val == CONNECTION_STATUS_WOULD_BLOCK) {
         tr_warn("endpoint_send_coap_message connection_send_data, would block");
     } else if (ret_val != CONNECTION_STATUS_OK) {
@@ -1108,7 +1160,9 @@ static bool endpoint_handle_endpoint_response(endpoint_t *endpoint, sn_coap_hdr_
                 break;
 
             case ENDPOINT_MSG_REGISTER:
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
                 notifier_clear_notifications(&endpoint->notifier);
+#endif
                 endpoint_handle_registration_response(endpoint, coap_header);
                 endpoint->registered = true;
                 endpoint_send_event(endpoint, ENDPOINT_EVENT_REGISTERED, ENDPOINT_EVENT_STATUS_OK);
@@ -1163,7 +1217,7 @@ static void endpoint_handle_response(endpoint_t *endpoint, sn_coap_hdr_s *coap_h
     }
 #endif
 
-    if (get_handler_handle_response(endpoint, coap_header) || handle_coap_response(endpoint, coap_header) ) {
+    if (req_handler_handle_response(endpoint, coap_header) || handle_coap_response(endpoint, coap_header) ) {
         // Response was handled.
         if (coap_header->coap_status == COAP_STATUS_BUILDER_MESSAGE_SENDING_FAILED ||
             coap_header->coap_status == COAP_STATUS_BUILDER_BLOCK_SENDING_FAILED) {
@@ -1255,11 +1309,16 @@ int endpoint_set_lifetime(endpoint_t *endpoint, uint32_t lifetime)
         tr_debug("endpoint_set_lifetime() setting default value (minimum): %"PRIu32, lifetime);
     }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     registry_path_t path;
     registry_set_path(&path, M2M_SERVER_ID, 0, SERVER_LIFETIME, 0, REGISTRY_PATH_RESOURCE);
     if (registry_set_value_int(&endpoint->registry, &path, lifetime) != REGISTRY_STATUS_OK) {
         return ENDPOINT_STATUS_ERROR;
     }
+#else
+    endpoint->lifetime = lifetime;
+#endif
+
 #ifndef SN_COAP_DISABLE_RESENDINGS
     // If the mode is UDP or Queue mode then reconfigure the retransmission count to avoid full registration cycle.
     if ((endpoint->mode | BINDING_MODE_U) || (endpoint->mode | BINDING_MODE_Q)) {
@@ -1274,8 +1333,10 @@ int endpoint_set_lifetime(endpoint_t *endpoint, uint32_t lifetime)
 
 int endpoint_get_lifetime(const endpoint_t *endpoint, uint32_t *lifetime) {
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     registry_path_t path;
     int64_t tmp_lifetime = 0;
+#endif
 
     if (!lifetime || !endpoint) {
         tr_error("endpoint_get_lifetime() invalid params");
@@ -1283,13 +1344,16 @@ int endpoint_get_lifetime(const endpoint_t *endpoint, uint32_t *lifetime) {
         return ENDPOINT_STATUS_ERROR;
     }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     registry_set_path(&path, M2M_SERVER_ID, 0, SERVER_LIFETIME, 0, REGISTRY_PATH_RESOURCE);
     if (registry_get_value_int(&endpoint->registry, &path, &tmp_lifetime) != REGISTRY_STATUS_OK) {
         tr_error("endpoint_get_lifetime() reading from registry failed!");
         return ENDPOINT_STATUS_ERROR;
     }
-
     *lifetime = (uint32_t) tmp_lifetime;
+#else
+    *lifetime = endpoint->lifetime;
+#endif
 
     return ENDPOINT_STATUS_OK;
 }
@@ -1347,6 +1411,32 @@ static uint8_t* write_data(uint8_t *to, const char *from, uint16_t len, int32_t 
     }
     return to;
 }
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+static uint8_t* write_resource(uint8_t *data, register_resource_t *iter, int32_t *len)
+{
+    data = write_char(data, '<', len);
+    data = write_string(data, iter->full_res_id, len);
+    data = write_char(data, '>', len);
+#if MBED_CLIENT_ENABLE_AUTO_OBSERVATION
+    if (iter->aobs_id > 0) {
+        size_t token_len = endpoint_itoa_len(iter->aobs_id);
+        // Token is between 1 - 1023
+        uint8_t temp_ptr[5] = {0};
+        endpoint_itoa((uint8_t*)&temp_ptr, iter->aobs_id);
+        data = write_parameter(data, auto_obs_parameter, sizeof(auto_obs_parameter),
+                               (char*)temp_ptr, token_len, 0, len);
+    }
+#endif
+#if MBED_CLIENT_ENABLE_PUBLISH_RESOURCE_VALUE_IN_REG_MSG
+    if (iter->value && iter->value_len) {
+        data = write_parameter(data, resource_value, sizeof(resource_value),
+                               (char*)iter->value, iter->value_len, 0, len);
+    }
+#endif
+    return data;
+}
+#endif
 
 static uint8_t *write_string(uint8_t *to, const char *from, int32_t *packet_len)
 {
@@ -1417,6 +1507,7 @@ static uint8_t *write_resource_name(uint8_t *packet, const registry_path_t *path
 }
 #endif
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static uint8_t *write_path(uint8_t *packet, const registry_path_t *path, int32_t *packet_len)
 {
     packet = write_char(packet, '<', packet_len);
@@ -1442,6 +1533,7 @@ static uint8_t *write_path(uint8_t *packet, const registry_path_t *path, int32_t
     packet = write_char(packet, '>', packet_len);
     return packet;
 }
+#endif
 
 
 static uint8_t *write_query_parameters(uint8_t *dest, const char *uri_query_parameters, int32_t *packet_len)
@@ -1450,6 +1542,7 @@ static uint8_t *write_query_parameters(uint8_t *dest, const char *uri_query_para
     return dest;
 }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static bool is_observable(const registry_path_t *path)
 {
 
@@ -1467,9 +1560,11 @@ static bool is_observable(const registry_path_t *path)
     return registry_meta_is_resource_observable(resource_def);
 
 }
+#endif
 
 static int endpoint_build_registration_body(endpoint_t *endpoint, sn_coap_hdr_s *message_ptr, uint8_t updating_registeration, int32_t *len)
 {
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     tr_debug("endpoint_build_registration_body");
     /* Local variables */
     uint8_t *data;
@@ -1601,9 +1696,104 @@ static int endpoint_build_registration_body(endpoint_t *endpoint, sn_coap_hdr_s 
         }
 
     }
+#else
+    if (!message_ptr) {
+        return ENDPOINT_STATUS_ERROR;
+    }
+    if (updating_registeration) {
+        message_ptr->payload_len = 0;
+        return ENDPOINT_STATUS_OK;
+    }
+
+    int ret = 0;
+    register_resource_t *all = NULL;
+    object_handler_t *temp = endpoint->object_handlers;
+    while (temp) {
+        if (temp->res_cb) {
+            register_resource_t *resources;
+            ret = temp->res_cb(endpoint, &resources);
+            if (!all) {
+                all = resources;
+            } else {
+                register_resource_t *t = all;
+                while (t->next) {
+                    t = t->next;
+                }
+                t->next = resources;
+            }
+            if (ret) {
+                tr_error("endpoint_build_registration_body - out of memory");
+                break;
+            }
+        }
+        temp = temp->next;
+    }
+
+    register_resource_t *iter;
+    register_resource_t *rest;
+    if (ret) {
+        // allocating resources failed - release what was allocated and exit with error
+        iter = all;
+        while (iter) {
+            rest = iter->next;
+            lwm2m_free(iter->value);
+            lwm2m_free(iter);
+            iter = rest;
+        }
+        return ENDPOINT_STATUS_ERROR;
+    }
+
+    // calculate registration message length
+    int32_t leng = 0;
+    iter = all;
+
+    write_resource(NULL, iter, &leng);
+    iter = iter->next;
+    while (iter) {
+        write_char(NULL, ',', &leng);
+        write_resource(NULL, iter, &leng);
+        iter = iter->next;
+    }
+
+    message_ptr->payload_len = leng;
+    if (!message_ptr->payload_len) {
+        return ENDPOINT_STATUS_OK;
+    }
+
+    if (leng < 0 || leng > UINT16_MAX) {
+        return ENDPOINT_STATUS_ERROR;
+    }
+    tr_debug("endpoint_build_registration_body - body size: [%d]", message_ptr->payload_len);
+    message_ptr->payload_ptr = lwm2m_alloc(message_ptr->payload_len);
+    if (!message_ptr->payload_ptr) {
+        return ENDPOINT_STATUS_ERROR;
+    }
+
+    /* Build message */
+    uint8_t *data = message_ptr->payload_ptr;
+
+    iter = all;
+    data = write_resource(data, iter, &leng);
+    rest = iter->next;
+    lwm2m_free(iter->value);
+    lwm2m_free(iter);
+    iter = rest;
+    while (iter) {
+        data = write_char(data, ',', &leng);
+        data = write_resource(data, iter, &leng);
+        rest = iter->next;
+        lwm2m_free(iter->value);
+        lwm2m_free(iter);
+        iter = rest;
+    }
+
+    if (leng < 0) {
+        return ENDPOINT_STATUS_ERROR;
+    }
+#endif
+
     return ENDPOINT_STATUS_OK;
 }
-
 
 static int endpoint_fill_uri_query_options(endpoint_t *endpoint,
                                              sn_coap_hdr_s *source_msg_ptr,
@@ -1773,17 +1963,17 @@ static void endpoint_print_coap_data(const sn_coap_hdr_s *coap_header_ptr, bool 
 #ifdef MBED_CLIENT_PRINT_COAP_PAYLOAD
     if (coap_header_ptr->payload_ptr && coap_header_ptr->payload_len > 0) {
         int i = 0;
-        int row_len = 40;
+        int row_len = 32;
         int max_length = 2048;
         while (i < coap_header_ptr->payload_len && i < max_length) {
             if (i + row_len > coap_header_ptr->payload_len) {
                 row_len = coap_header_ptr->payload_len - i;
             }
-            tr_info("Payload:\t\t%s", tr_array( coap_header_ptr->payload_ptr + i, row_len));
+            tr_info("PL:\t\t%s", tr_array( coap_header_ptr->payload_ptr + i, row_len));
             i += row_len;
         }
         if (i >= max_length)
-            tr_info("Payload:\t\t.....");
+            tr_info("PL:\t\t.....");
     }
 #endif
 
@@ -1956,9 +2146,20 @@ static const char *endpoint_coap_message_type_desc(int msg_type)
 #endif
 
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static size_t endpoint_itoa_len(uint32_t value)
+#else
+static size_t endpoint_itoa_len(int64_t value)
+#endif
 {
     size_t i = 0;
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    if (value < 0) {
+        i++; // minus sign
+        value *= -1;
+    }
+#endif
 
     do {
         i++;
@@ -1967,12 +2168,25 @@ static size_t endpoint_itoa_len(uint32_t value)
     return i;
 }
 
+
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static uint8_t *endpoint_itoa(uint8_t *ptr, uint32_t value)
+#else
+static uint8_t *endpoint_itoa(uint8_t *ptr, int64_t value)
+#endif
 {
 
     uint8_t start = 0;
     uint8_t end = 0;
     int i;
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    bool negative = false;
+    if (value < 0) {
+        negative = true;
+        value *= -1;
+    }
+#endif
 
     i = 0;
 
@@ -1980,6 +2194,12 @@ static uint8_t *endpoint_itoa(uint8_t *ptr, uint32_t value)
     do {
         ptr[i++] = (value % 10) + '0';
     } while ((value /= 10) > 0);
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    if (negative) {
+        ptr[i++] = '-';
+    }
+#endif
 
     end = i - 1;
 
@@ -2169,6 +2389,7 @@ void endpoint_start_coap_exec_timer(endpoint_t *endpoint)
 
 #if MBED_CLIENT_ENABLE_PUBLISH_RESOURCE_VALUE_IN_REG_MSG
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 uint8_t* write_resource_value(uint8_t *packet, const registry_path_t *path, int32_t *packet_len, const endpoint_t *endpoint)
 {
     const lwm2m_resource_meta_definition_t *static_data;
@@ -2276,5 +2497,195 @@ uint8_t* write_resource_value(uint8_t *packet, const registry_path_t *path, int3
 
     return packet;
 }
+#endif
 
 #endif // MBED_CLIENT_ENABLE_PUBLISH_RESOURCE_VALUE_IN_REG_MSG
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+void endpoint_register_object_handler(endpoint_t *endpoint, object_handler_t *handler)
+{
+    if (!endpoint->object_handlers) {
+        endpoint->object_handlers = handler;
+    } else {
+        object_handler_t *temp = endpoint->object_handlers;
+        while (temp->next) {
+            temp = temp->next;
+        }
+        temp->next = handler;
+    }
+}
+
+void endpoint_remove_object_handler(endpoint_t *endpoint, uint16_t object_id)
+{
+    object_handler_t *temp = endpoint->object_handlers;
+    object_handler_t *prev = NULL;
+    while (temp) {
+        if (temp->object_id == object_id) {
+            object_handler_t *to_free = temp;
+            if (prev) {
+                prev->next = temp->next;
+            } else {
+                endpoint->object_handlers = temp->next;
+            }
+            lwm2m_free(to_free);
+            break;
+        }
+        prev = temp;
+        temp = temp->next;
+    }
+}
+
+object_handler_t *endpoint_allocate_object_handler(uint16_t object_id, get_resources_cb *res_cb,
+                                                   coap_req_cb *req_cb, registry_callback_t obj_cb)
+{
+    object_handler_t *tmp = lwm2m_alloc(sizeof(object_handler_t));
+    if (tmp) {
+        tmp->object_id = object_id;
+        tmp->res_cb = res_cb;
+        tmp->req_cb = req_cb;
+        tmp->obj_cb = obj_cb;
+        tmp->next = NULL;
+    }
+
+    return tmp;
+}
+
+static uint16_t get_auto_obs_id(endpoint_t *endpoint)
+{
+    // auto obs token range is between 1 -1023
+    endpoint->auto_obs_token++;
+    if (endpoint->auto_obs_token > 1023) {
+        endpoint->auto_obs_token = 1;
+    }
+    return endpoint->auto_obs_token;
+}
+
+register_resource_t *endpoint_create_register_resource_str(endpoint_t *endpoint,
+                                                           const char *id, bool auto_obs,
+                                                           const uint8_t *value, uint16_t len)
+{
+    register_resource_t *res = lwm2m_alloc(sizeof(register_resource_t));
+    if (!res) {
+        return NULL;
+    }
+    res->next = NULL; // zero-init the link
+    res->full_res_id = id;
+
+#if MBED_CLIENT_ENABLE_AUTO_OBSERVATION
+    if (auto_obs) {
+        res->aobs_id = get_auto_obs_id(endpoint);
+    } else {
+        res->aobs_id = 0;
+    }
+#else
+    res->aobs_id = 0;
+    (void)auto_obs;
+    (void)endpoint;
+#endif
+
+#if MBED_CLIENT_ENABLE_PUBLISH_RESOURCE_VALUE_IN_REG_MSG
+    if (value && len) {
+        uint8_t *val = lwm2m_alloc_copy(value, len);
+        if (!val) {
+            lwm2m_free(res);
+            return NULL;
+        }
+        res->value_len = len;
+        res->value = val;
+    } else {
+        res->value_len = 0;
+        res->value = NULL;
+    }
+#else
+    (void)value;
+    (void)len;
+#endif
+
+    return res;
+}
+
+register_resource_t *endpoint_create_register_resource_int(endpoint_t *endpoint,
+                                                           const char *id,
+                                                           bool auto_obs,
+                                                           int64_t value)
+{
+    size_t int_len = endpoint_itoa_len(value);
+    uint8_t *int_ptr = lwm2m_alloc(int_len);
+
+    if (!int_ptr) {
+        tr_error("endpoint_create_register_resource_int - failed to allocate buffer");
+        return NULL;
+    }
+
+    endpoint_itoa(int_ptr, value);
+
+    register_resource_t * res = endpoint_create_register_resource_str(endpoint, id, auto_obs, int_ptr, int_len);
+    lwm2m_free(int_ptr);
+    return res;
+}
+
+register_resource_t *endpoint_create_register_resource_opaque(endpoint_t *endpoint,
+                                                           const char *id, bool auto_obs,
+                                                           const uint8_t *value, uint16_t len)
+{
+    int ret;
+    register_resource_t * res;
+    size_t dst_size;
+    uint8_t *dst;
+    size_t olen;
+
+    dst_size = (((len + 2) / 3) << 2) + 1;
+    dst = (uint8_t*) lwm2m_alloc(dst_size);
+    if (!dst) {
+        tr_error("endpoint_create_register_resource_opaque - failed to allocate buffer");
+        return NULL;
+    }
+
+    olen = 0;
+    ret = mbedtls_base64_encode(dst, dst_size, &olen, value, len);
+    if (ret == 0 && olen > 0) {
+        res = endpoint_create_register_resource_str(endpoint, id, auto_obs, dst, olen);
+    } else {
+        tr_error("endpoint_create_register_resource_opaque - error in Base64 encoding. Error %d or olen is 0", ret);
+        res = NULL;
+    }
+    lwm2m_free(dst);
+
+    return res;
+}
+
+register_resource_t *endpoint_create_register_resource(endpoint_t *endpoint, const char *id, bool auto_obs)
+{
+    return endpoint_create_register_resource_str(endpoint, id, auto_obs, NULL, 0);
+}
+
+static object_handler_t* get_object_handler(endpoint_t* endpoint, uint16_t object_id)
+{
+    object_handler_t *handler = endpoint->object_handlers;
+    while (handler) {
+        if (handler->object_id == object_id) {
+            return handler;
+        }
+        handler = handler->next;
+    }
+    return NULL;
+}
+
+coap_req_cb* endpoint_get_coap_request_callback(endpoint_t *endpoint, uint16_t object_id)
+{
+    object_handler_t *handler = get_object_handler(endpoint, object_id);
+    if (handler) {
+        return handler->req_cb;
+    }
+    return NULL;
+}
+
+registry_callback_t endpoint_get_object_callback(endpoint_t *endpoint, uint16_t object_id)
+{
+    object_handler_t *handler = get_object_handler(endpoint, object_id);
+    if (handler) {
+        return handler->obj_cb;
+    }
+    return NULL;
+}
+#endif

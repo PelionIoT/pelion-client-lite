@@ -86,8 +86,8 @@ struct bspatch_stream {
     int64_t undeCompressBuffer_len;
     int64_t total_undeCompressBuffer; /* keeping track of total undeCompressBuffer bytes */
     uint64_t var_int;
-    uint64_t var_int_len;
-    uint64_t frame_len;
+    uint32_t var_int_len;
+    uint32_t frame_len;
     int64_t newpos; /* keeping track of position of the resulting file */
     int64_t i;
     int64_t ctrl[3];

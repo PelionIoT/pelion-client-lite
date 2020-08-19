@@ -17,9 +17,6 @@
 #ifndef LWM2M_REGISTRY_HANDLER_H
 #define LWM2M_REGISTRY_HANDLER_H
 
-#include "lwm2m_registry.h"
-#include "lwm2m_endpoint.h"
-
 #include "ns_list.h"
 #include "ns_types.h"
 #include "sn_coap_header.h"
@@ -89,6 +86,19 @@ void send_execute_response(const registry_path_t *path,
  * \param endpoint Pointer to related endpoint.
  */
 void response_message_send(endpoint_t *endpoint);
+
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+/**
+ * \brief Queue a callback to be called.
+ *
+ * \param path Pointer to resource path.
+ * \param received_coap_header Pointer to CoAP data from the CoAP library.
+ * \param type Event type.
+ */
+bool send_callback_data(const registry_path_t *path,
+                        const sn_coap_hdr_s *received_coap_header,
+                        const uint8_t type);
+#endif
 
 #ifdef __cplusplus
 }

@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+
 #include <stddef.h>
 #include <string.h>
 #include <assert.h>
@@ -1954,3 +1956,5 @@ bool registry_publish_resource_value_in_reg_msg(registry_t *registry, const regi
 
 #endif // MBED_CLIENT_ENABLE_PUBLISH_RESOURCE_VALUE_IN_REG_MSG
 }
+
+#endif // !defined(MBED_CLOUD_CLIENT_DISABLE_REGISTRY)

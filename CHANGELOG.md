@@ -1,5 +1,10 @@
 ## Changelog for Pelion Device Management Client Lite
 
+### Release 1.2.0-lite (19.08.2020)
+
+* Fixed an issue where Client Lite would trigger sleep-callback during the bootstrapping process.
+* Changed the notification handler to send a notification only when crossing the "less than" or "greater than" notification threshold values.
+
 ### Release 1.1.1-lite (05.06.2020)
 
 Client Lite 1.1.0 sends an additional component update object (/14) as part of its registration message even though the client does not support it yet. The update service has changed recently to handle the client differently, so there is no backward compatibility. Client Lite 1.1.0 cannot successfully update firmware. As part of this patch release, component update is behind a feature flag that is disabled in Client Lite release.

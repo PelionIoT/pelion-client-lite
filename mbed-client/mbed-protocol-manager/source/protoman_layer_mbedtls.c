@@ -46,8 +46,10 @@ static int _do_connect(struct protoman_layer_s *layer);
 static int _do_write(struct protoman_layer_s *layer);
 static int _do_read(struct protoman_layer_s *layer);
 static int _do_disconnect(struct protoman_layer_s *layer);
+static int _do_resume(struct protoman_layer_s *layer);
 //static int _do_pause(struct protoman_layer_s *layer);
 static void layer_free(struct protoman_layer_s *layer);
+static void print_cid(struct protoman_layer_s *layer, const char* prefix);
 /* macro's for checking defines */
 #define MAKE_CHECK_T( X ) X ## _check
 #define MAKE_CHECK( X ) MAKE_CHECK_T( X )
@@ -55,8 +57,10 @@ static void layer_free(struct protoman_layer_s *layer);
 /* Mbed TLS contains secure memcpy, use if available */
 #if defined(MBEDTLS_ERR_PLATFORM_FAULT_DETECTED)
 #define PROTOMAN_MEMCPY mbedtls_platform_memcpy
+#define PROTOMAN_MEMSET mbedtls_platform_memset
 #else
 #define PROTOMAN_MEMCPY memcpy
+#define PROTOMAN_MEMSET memset
 #endif
 
 #ifdef PROTOMAN_ERROR_STRING
@@ -92,7 +96,7 @@ static const struct protoman_layer_callbacks_s callbacks = {
     &_do_write,
     &_do_disconnect,
     NULL, // &_do_pause
-    NULL  // &_do_resume
+    _do_resume  // &_do_resume
 };
 
 void protoman_add_layer_mbedtls(struct protoman_s *protoman, struct protoman_layer_s *layer)
@@ -100,7 +104,11 @@ void protoman_add_layer_mbedtls(struct protoman_s *protoman, struct protoman_lay
     struct protoman_layer_mbedtls_common_s *layer_mbedtls_common = (struct protoman_layer_mbedtls_common_s *)layer;
 
     /* layer struct initial values */
+#ifdef MBED_CONF_MBED_TRACE_ENABLE
     layer->name = "mbed TLS"; // must be set before first print from this layer
+#else
+    layer->name = NULL;
+#endif
 
     protoman_debug("");
 
@@ -628,6 +636,9 @@ static int _do_certificates(struct protoman_layer_s *layer)
             break;
     }
 
+    // ownkey is copied or parsed (or failed), it should be cleared from the memory
+    PROTOMAN_MEMSET(config_cert->ownkey.buf, 0, config_cert->ownkey.len);
+
     if (retval < 0) {
         protoman_err("ownkey parsing failed with %s (%d)", protoman_strmbedtls(retval), retval);
         protoman_layer_record_error(layer, _conn_error_status_get(retval), retval, protoman_strmbedtls(retval));
@@ -678,25 +689,7 @@ static int _do_connect(struct protoman_layer_s *layer)
             /* Handshake done */
             if (MBEDTLS_SSL_HANDSHAKE_OVER == layer_mbedtls_common->ssl.state) {
                 protoman_info("mbedtls_ssl_handshake_step(), finish");
-
-#if defined(MBEDTLS_SSL_DTLS_CONNECTION_ID) && defined(MBEDTLS_SSL_CID_ENABLED)
-#ifdef PROTOMAN_VERBOSE
-                if (layer->protoman->config.is_dgram) {
-                    int enabled = 0;
-                    size_t peer_cid_len = 0;
-                    unsigned char peer_cid[ MBEDTLS_SSL_CID_OUT_LEN_MAX ];
-                    if (!mbedtls_ssl_get_peer_cid(&layer_mbedtls_common->ssl, &enabled, peer_cid, &peer_cid_len)) {
-                        if (enabled) {
-                            protoman_verbose("PEER CID: %s.", tr_array(peer_cid, peer_cid_len));
-                        } else {
-                            protoman_verbose("PEER CID: disabled");
-                        }
-                    } else {
-                        protoman_err("mbedtls_ssl_get_peer_cid() failed");
-                    }
-                }
-#endif
-#endif
+                print_cid(layer, "do_connect");
 
                 /* Capture master secret for TLS decryption in Wireshark */
                 protoman_sslkeylog_snapshot_master_secret(layer);
@@ -915,6 +908,12 @@ static int _do_disconnect(struct protoman_layer_s *layer)
     return PROTOMAN_STATE_RETVAL_FINISHED;
 }
 
+static int _do_resume(struct protoman_layer_s *layer)
+{
+    print_cid(layer, "do_resume");
+    return PROTOMAN_STATE_RETVAL_FINISHED;
+}
+
 static int _do_init(struct protoman_layer_s *layer)
 {
     struct protoman_config_tls_common_s *config_common = (struct protoman_config_tls_common_s *)layer->config;
@@ -1092,3 +1091,27 @@ void load_ssl_session(struct protoman_layer_s *layer)
     }
 }
 #endif //PROTOMAN_USE_SSL_SESSION_RESUME
+
+static void print_cid(struct protoman_layer_s *layer, const char* prefix)
+{
+    (void) layer; // quiet compiler
+#if defined(MBEDTLS_SSL_DTLS_CONNECTION_ID) && defined(MBEDTLS_SSL_CID_ENABLED)
+#ifdef PROTOMAN_VERBOSE
+    struct protoman_layer_mbedtls_common_s *layer_mbedtls_common = (struct protoman_layer_mbedtls_common_s *)layer;
+    if (layer->protoman->config.is_dgram) {
+        int enabled = 0;
+        size_t peer_cid_len = 0;
+        unsigned char peer_cid[MBEDTLS_SSL_CID_OUT_LEN_MAX];
+        if (!mbedtls_ssl_get_peer_cid(&layer_mbedtls_common->ssl, &enabled, peer_cid, &peer_cid_len)) {
+            if (enabled) {
+                protoman_verbose("%s PEER CID: %s.", prefix, tr_array(peer_cid, peer_cid_len));
+            } else {
+                protoman_verbose("PEER CID: disabled");
+            }
+        } else {
+            protoman_err("mbedtls_ssl_get_peer_cid() failed");
+        }
+    }
+#endif
+#endif
+}

@@ -16,47 +16,24 @@
 // limitations under the License.
 // ----------------------------------------------------------------------------
 
-#ifndef __FOTA_H_
-#define __FOTA_H_
-
-#include "fota/fota_config.h"
-
-#if MBED_CLOUD_CLIENT_FOTA_ENABLE
-
-// TODO: move to delta -  when integrated
-#if !defined(MBED_CLOUD_CLIENT_FOTA_DELTA_BLOCK_SIZE)
-#define MBED_CLOUD_CLIENT_FOTA_DELTA_BLOCK_SIZE 1024
-#endif
-
-
-#include "fota/fota_status.h"
+#ifndef __FOTA_NVM_INT_H_
+#define __FOTA_NVM_INT_H_
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct endpoint_s endpoint_t;
+#include "fota/fota_base.h"
+#include "CloudClientStorage.h"
 
-/*
- * Initialize Pelion FOTA component.
- *
- * This method should be called once on system strut-up.
- * \param[in] in_endpoint Mbed Cloud Client Lite LWM2M Endpoint instance
- * \return FOTA_STATUS_SUCCESS on success
- */
-int fota_init(endpoint_t *in_endpoint);
+int fota_nvm_get(cloud_client_param key, uint8_t *buffer, size_t buffer_size, size_t *bytes_read);
 
-/*
- * Deinitialize Pelion FOTA component.
- *
- * \return FOTA_STATUS_SUCCESS on success
- */
-int fota_deinit(void);
+int fota_nvm_set(cloud_client_param key, const uint8_t *buffer, size_t buffer_size);
+
+int fota_nvm_remove(cloud_client_param key);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // MBED_CLOUD_CLIENT_FOTA_ENABLE
-
-#endif // __FOTA_H_
+#endif //__FOTA_NVM_INT_H_

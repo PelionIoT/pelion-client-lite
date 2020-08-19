@@ -305,6 +305,7 @@ const void *storage_read_ca_certificate(size_t *buffer_size, bool bootstrap)
 }
 #endif //defined(PROTOMAN_SECURITY_ENABLE_CERTIFICATE)
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 bool storage_set_credentials(registry_t *registry)
 {
     registry_path_t path;
@@ -317,10 +318,9 @@ bool storage_set_credentials(registry_t *registry)
 #endif //defined(PROTOMAN_SECURITY_ENABLE_CERTIFICATE)
     const char *server_uri;
     int64_t security;
-
     tr_debug("set_connector_credentials()");
 
-    registry_set_path(&path, M2M_SECURITY_ID, 0, 0, 0, REGISTRY_PATH_OBJECT_INSTANCE);
+    registry_set_path(&path, M2M_SECURITY_ID, 0, SECURITY_M2M_SERVER_URI, 0, REGISTRY_PATH_OBJECT_INSTANCE);
     if (REGISTRY_STATUS_OK != registry_path_exists(registry, &path)) {
         tr_info("set_connector_credentials() No credentials available.");
         return false;
@@ -375,7 +375,6 @@ bool storage_set_credentials(registry_t *registry)
 
 #if defined(PROTOMAN_SECURITY_ENABLE_PSK)
     if (security == 0) {
-
         if (!storage_set_parameter(LWM2M_SERVER_PSK_IDENTITY, public_key->data, public_key->size)) {
             tr_error("set_connector_credentials() storage_set_parameter public_key failed");
             return false;
@@ -385,7 +384,6 @@ bool storage_set_credentials(registry_t *registry)
             tr_error("set_connector_credentials() storage_set_parameter sec_key failed");
             return false;
         }
-
     }
 #endif //defined(PROTOMAN_SECURITY_ENABLE_PSK)
 #if defined(PROTOMAN_SECURITY_ENABLE_CERTIFICATE)
@@ -432,10 +430,10 @@ bool storage_set_credentials(registry_t *registry)
     registry_remove_object(registry, &path, REGISTRY_REMOVE);
 
     return true;
-
-
 }
+#endif
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 bool storage_set_bootstrap_credentials(registry_t *registry)
 {
 #if defined(PROTOMAN_SECURITY_ENABLE_PSK)
@@ -483,6 +481,7 @@ bool storage_set_bootstrap_credentials(registry_t *registry)
     return false;
 #endif //defined(PROTOMAN_SECURITY_ENABLE_PSK)
 }
+#endif
 
 bool storage_set_internal_endpoint_name(const char *iep)
 {

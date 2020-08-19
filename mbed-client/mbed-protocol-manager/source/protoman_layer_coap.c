@@ -131,8 +131,11 @@ static uint8_t wrapper_coap_tx(uint8_t *buf, uint16_t len, sn_nsdl_addr_s *addr,
 void protoman_add_layer_coap(struct protoman_s *protoman, struct protoman_layer_s *layer)
 {
     struct protoman_layer_coap_s *layer_coap = (struct protoman_layer_coap_s *)layer;
-
+#ifdef MBED_CONF_MBED_TRACE_ENABLE
     layer->name = "CoAP"; // must be set before first print from this layer
+#else
+    layer->name = NULL;
+#endif
 
     protoman_debug("");
 
@@ -380,8 +383,8 @@ static int layer_write(struct protoman_layer_s *layer, struct protoman_io_header
         return PROTOMAN_ERR_NOMEM;
     }
 
-    int retval = sn_coap_protocol_build(layer_coap->coap, &layer_coap->dummy_addr, layer->tx_buf, op->coap_header, layer);
-    switch (retval) {
+    layer->tx_len = sn_coap_protocol_build(layer_coap->coap, &layer_coap->dummy_addr, layer->tx_buf, op->coap_header, layer);
+    switch (layer->tx_len) {
         case -1:
             protoman_warn("sn_coap_protocol_build() had failure with CoAP header structure");
             PROTOMAN_DEBUG_PRINT_FREE(layer->name, layer->tx_buf);

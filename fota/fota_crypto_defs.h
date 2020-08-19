@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -28,22 +28,12 @@ extern "C" {
 
 #define FOTA_ENCRYPT_KEY_SIZE 16 /*< AES-128 key size in bytes */
 
-#define FOTA_ENCRYPT_METADATA_MAX_SIZE 8 /*< AES-CCM tag size in bytes */
-
-#define FOTA_ENCRYPT_METADATA_START_SIZE 24
-#define FOTA_ENCRYPT_METADATA_MAGIC ((uint32_t)(0x4a6ba649))
-#define FOTA_ENCRYPT_METADATA_SALT_LEN FOTA_ENCRYPT_KEY_SIZE
+#define FOTA_ENCRYPT_TAG_SIZE 8 /*< AES-CCM tag size in bytes */
 
 #define FOTA_CRYPTO_HASH_SIZE  32  /*< SHA256 digest size in bytes*/
 
-#if !defined(MBED_CLOUD_CLIENT_FOTA_ENCRYPT_BLOCK_SIZE)
-/* Encryption block size used for encrypting FW candidate */
-#define MBED_CLOUD_CLIENT_FOTA_ENCRYPT_BLOCK_SIZE 1024
-#endif
-
-typedef struct {
-    uint32_t    encrypt_block_size;
-} fota_encrypt_config_t;
+#define FOTA_UPDATE_RAW_PUBLIC_KEY_SIZE 65  // compression byte  | r | s
+#define FOTA_IMAGE_RAW_SIGNATURE_SIZE 64  // raw signature
 
 #ifdef __cplusplus
 }

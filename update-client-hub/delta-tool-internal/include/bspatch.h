@@ -76,7 +76,7 @@ typedef enum {
 typedef struct bspatch_stream bspatch_stream;
 
 // functions pointer prototypes for BS_PATCH_API
-typedef bs_patch_api_return_code_t (*read_patch_f)(const bspatch_stream *stream, void *buffer, uint64_t length);
+typedef bs_patch_api_return_code_t (*read_patch_f)(const bspatch_stream *stream, void *buffer, uint32_t length);
 typedef bs_patch_api_return_code_t (*read_old_f)(const bspatch_stream *stream, void *buffer, uint64_t length);
 typedef bs_patch_api_return_code_t (*seek_old_f)(const bspatch_stream *stream, int64_t seek_diff);
 typedef bs_patch_api_return_code_t (*write_new_f)(const bspatch_stream *stream, void *buffer, uint64_t length);

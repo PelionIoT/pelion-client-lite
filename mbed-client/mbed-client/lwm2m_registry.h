@@ -159,7 +159,7 @@ registry_status_t registry_remove_object(registry_t *registry, const registry_pa
  * \param registry Pointer to the registry to be used.
  * \param path Path to the Resource.
  * \param value New value for the Resource. This will be copied to the internal structure.
- * \param free_on_remove Only available with string and opaque values. If true, the value will be freed after removing or modifying 
+ * \param free_on_remove Only available with string and opaque values. If true, the value will be freed after removing or modifying
  * the Resource using `lwm2m_free()`.
  *
  * \return REGISTRY_STATUS_OK Data set.
@@ -410,7 +410,12 @@ typedef registry_status_t (*registry_callback_t)(registry_callback_type_t,
                                                  const registry_callback_token_t*,
                                                  const registry_object_value_t*,
                                                  const registry_notification_status_t,
-                                                 registry_t *);
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+                                                 registry_t *
+#else
+                                                 void *
+#endif
+                                                 );
 
 /**
  * \brief Set callback function to specified registry object (path).
@@ -455,7 +460,7 @@ bool registry_compare_path(const registry_path_t *path, const registry_path_t *p
  * \param path Registry path to print.
  *
  */
-#if defined(MBED_CONF_MBED_TRACE_ENABLE) && (MBED_CONF_MBED_TRACE_ENABLE == 1)
+#if defined(MBED_CONF_MBED_TRACE_ENABLE) && (MBED_CONF_MBED_TRACE_ENABLE == 1) && !defined(MBED_CLOUD_CLIENT_DISABLE_REGISTRY)
 #define print_registry_path(prefix, path) _print_registry_path(prefix, path)
 
 // This is the real printer, that must be used with `print_registry_path()` as it lets the compiler to remove

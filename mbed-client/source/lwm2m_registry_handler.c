@@ -19,9 +19,11 @@
 #include "lwm2m_endpoint.h"
 #include "lwm2m_heap.h"
 #include "lwm2m_notifier.h"
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 #include "lwm2m_registry.h"
-#include "lwm2m_registry_handler.h"
 #include "lwm2m_registry_meta.h"
+#endif
+#include "lwm2m_registry_handler.h"
 #include "tlvserializer.h"
 #include "eventOS_event.h"
 #include "mbed-trace/mbed_trace.h"
@@ -34,15 +36,18 @@
 /* Defines */
 #define TRACE_GROUP "RegH"
 
-static uint8_t parse_registry_path(const char* uri, registry_path_t* path);
+static uint8_t parse_registry_path(const uint8_t* buf, size_t len, registry_path_t* path);
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static char *registry_path_to_string(const registry_path_t* path);
 static bool send_callback_data(const registry_path_t *path, const sn_coap_hdr_s* header, const uint8_t type);
 static sn_coap_hdr_s* handle_get_request(const registry_path_t* path, endpoint_t* endpoint, sn_coap_hdr_s* received_coap_header);
 static sn_coap_hdr_s* handle_put_request(const registry_path_t* path, endpoint_t *endpoint, sn_coap_hdr_s* received_coap_header);
 static sn_coap_hdr_s* handle_delete_request(const registry_path_t* path, endpoint_t *endpoint, sn_coap_hdr_s* received_coap_header);
+#endif
 static sn_coap_hdr_s* handle_execute_request(const registry_path_t* path, endpoint_t *endpoint,
                                              sn_coap_hdr_s* received_coap_header,
                                              sn_nsdl_addr_s *address, int* execute_value_updated);
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 #if MBED_CLIENT_ENABLE_OBSERVATION_PARAMETERS
 static sn_coap_msg_code_e read_attribute_value(const char *query, const char *query_end, uint32_t *int_value, float *float_value, bool *available);
 #endif
@@ -59,9 +64,19 @@ static sn_coap_hdr_s* handle_unsupported_request(endpoint_t *endpoint,
     coap_response->msg_code = COAP_MSG_CODE_RESPONSE_BAD_REQUEST;
     return coap_response;
 }
+#endif
 
-static uint8_t parse_registry_path(const char* uri, registry_path_t* path)
+static uint8_t parse_registry_path(const uint8_t* buf, size_t len, registry_path_t* path)
 {
+    char uri[MAX_VALUE_LENGTH];
+
+    if (len > MAX_VALUE_LENGTH - 1) {
+        // uri buffer is too big - it must fit in MAX_VALUE_LENGTH bytes with a terminating nul
+        return 0;
+    }
+
+    memcpy(uri, buf, len);
+    uri[len] = '\0';
 
     /* uri may contain 0-3 slashes, and uses the following format:
      * "1" is object 1
@@ -130,6 +145,7 @@ static uint8_t parse_registry_path(const char* uri, registry_path_t* path)
     return pathpart;
 }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static char *registry_path_to_string(const registry_path_t* path)
 {
     /* four uint16_t fields, three slashes and terminating null byte */
@@ -748,6 +764,7 @@ static sn_coap_hdr_s* handle_delete_request(const registry_path_t* path, endpoin
 #endif //MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 }
 
+#endif // !defined(MBED_CLOUD_CLIENT_DISABLE_REGISTRY)
 
 static sn_coap_hdr_s* handle_execute_request(const registry_path_t* path, endpoint_t *endpoint,
                                              sn_coap_hdr_s* received_coap_header,
@@ -755,9 +772,10 @@ static sn_coap_hdr_s* handle_execute_request(const registry_path_t* path, endpoi
 {
 
     sn_coap_hdr_s * coap_response;
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     const lwm2m_resource_meta_definition_t* resdef;
-
     registry_callback_t callback;
+#endif
 
     tr_debug("handle_execute_request()");
 
@@ -772,6 +790,7 @@ static sn_coap_hdr_s* handle_execute_request(const registry_path_t* path, endpoi
         return coap_response;
     }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     if (registry_meta_get_resource_definition(path->object_id, path->resource_id, &resdef) != REGISTRY_STATUS_OK) {
         coap_response->msg_code = COAP_MSG_CODE_RESPONSE_NOT_FOUND;
         return coap_response;
@@ -781,6 +800,7 @@ static sn_coap_hdr_s* handle_execute_request(const registry_path_t* path, endpoi
         coap_response->msg_code = COAP_MSG_CODE_RESPONSE_METHOD_NOT_ALLOWED;
         return coap_response;
     }
+#endif
 
     /* only plaintext values are supported at the moment */
     if(received_coap_header->content_format != COAP_CT_TEXT_PLAIN && received_coap_header->content_format != COAP_CT_NONE) {
@@ -793,9 +813,9 @@ static sn_coap_hdr_s* handle_execute_request(const registry_path_t* path, endpoi
         return coap_response;
     }
 
-    /* fetch callback function and call it, ignoring return value */
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    /* check if a callback exists, and queue for calling it if it does */
     if (registry_get_callback(&endpoint->registry, path, &callback) == REGISTRY_STATUS_OK) {
-
         if (send_callback_data(path, received_coap_header, REGISTRY_CALLBACK_EXECUTE)) {
             endpoint->confirmable_response.pending = true;
             coap_response->msg_code = COAP_MSG_CODE_EMPTY;
@@ -804,7 +824,12 @@ static sn_coap_hdr_s* handle_execute_request(const registry_path_t* path, endpoi
         } else {
             coap_response->msg_code = COAP_MSG_CODE_RESPONSE_INTERNAL_SERVER_ERROR;
         }
-
+#else
+    /* check if callback exists, and pass the request on for further processing if it does */
+    coap_req_cb *callback = endpoint_get_coap_request_callback(endpoint, path->object_id);
+    if (callback) {
+        coap_response = callback(path, endpoint, received_coap_header, address, coap_response, execute_value_updated);
+#endif
     } else {
         coap_response->msg_code = COAP_MSG_CODE_RESPONSE_NOT_FOUND;
     }
@@ -813,6 +838,7 @@ static sn_coap_hdr_s* handle_execute_request(const registry_path_t* path, endpoi
 
 }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static sn_coap_hdr_s* handle_create_request(registry_path_t* path, endpoint_t *endpoint,
                                             sn_coap_hdr_s* received_coap_header,
                                             sn_nsdl_addr_s *address, int* execute_value_updated)
@@ -916,6 +942,7 @@ static sn_coap_hdr_s* handle_create_request(registry_path_t* path, endpoint_t *e
     return handle_unsupported_request(endpoint, received_coap_header);
 #endif //MBED_CLIENT_ENABLE_DYNAMIC_CREATION
 }
+#endif // !defined(MBED_CLOUD_CLIENT_DISABLE_REGISTRY)
 
 static sn_coap_hdr_s* handle_post_request(registry_path_t* path, endpoint_t *endpoint,
                                           sn_coap_hdr_s* received_coap_header,
@@ -927,9 +954,12 @@ static sn_coap_hdr_s* handle_post_request(registry_path_t* path, endpoint_t *end
 
         return handle_execute_request(path, endpoint, received_coap_header, address, execute_value_updated);
 
-    } else if (path->path_type == REGISTRY_PATH_OBJECT || path->path_type == REGISTRY_PATH_OBJECT_INSTANCE) {
+    }
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+     else if (path->path_type == REGISTRY_PATH_OBJECT || path->path_type == REGISTRY_PATH_OBJECT_INSTANCE) {
         return handle_create_request(path, endpoint, received_coap_header, address, execute_value_updated);
     }
+#endif
 
     return NULL;
 
@@ -943,8 +973,10 @@ void handle_coap_request(endpoint_t *endpoint,
     int execute_value_updated = 0;
     sn_coap_hdr_s *coap_response = NULL;
     sn_coap_msg_code_e msg_code = COAP_MSG_CODE_RESPONSE_BAD_REQUEST; // 4.00
-    char resource_name[MAX_VALUE_LENGTH];
     registry_path_t regpath;
+    uint8_t regpath_depth;
+
+    regpath_depth = parse_registry_path(received_coap_header->uri_path_ptr, received_coap_header->uri_path_len, &regpath);
 
     if (received_coap_header->coap_status == COAP_STATUS_PARSER_BLOCKWISE_ACK ||
         received_coap_header->coap_status == COAP_STATUS_PARSER_BLOCKWISE_MSG_RECEIVING) {
@@ -953,20 +985,20 @@ void handle_coap_request(endpoint_t *endpoint,
         return;
     }
 
-    memcpy(resource_name, (char*)received_coap_header->uri_path_ptr,
-           received_coap_header->uri_path_len);
-    resource_name[received_coap_header->uri_path_len] = '\0';
+    tr_debug("handle_coap_request() - resource_name %.*s",  received_coap_header->uri_path_len, received_coap_header->uri_path_ptr);
 
-    tr_debug("handle_coap_request() - resource_name %s", resource_name);
-
-    uint8_t regpath_depth = parse_registry_path(resource_name, &regpath);
     if (regpath_depth > 0) {
         /* now we need to figure out if the request type matches the path type */
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
         if (COAP_MSG_CODE_REQUEST_GET == received_coap_header->msg_code) {
             coap_response = handle_get_request(&regpath, endpoint, received_coap_header);
         } else if (COAP_MSG_CODE_REQUEST_PUT == received_coap_header->msg_code) {
             coap_response = handle_put_request(&regpath, endpoint, received_coap_header);
-        } else if (COAP_MSG_CODE_REQUEST_POST == received_coap_header->msg_code) {
+        } else if (COAP_MSG_CODE_REQUEST_DELETE == received_coap_header->msg_code) {
+            coap_response = handle_delete_request(&regpath, endpoint, received_coap_header);
+        } else
+#endif
+        if (COAP_MSG_CODE_REQUEST_POST == received_coap_header->msg_code) {
             if (regpath.path_type == REGISTRY_PATH_RESOURCE_INSTANCE) {
                 msg_code = COAP_MSG_CODE_RESPONSE_BAD_REQUEST;
             } else {
@@ -975,16 +1007,23 @@ void handle_coap_request(endpoint_t *endpoint,
                                                           address, &execute_value_updated);
                 //TODO: block transfer...
             }
-        } else if (COAP_MSG_CODE_REQUEST_DELETE == received_coap_header->msg_code) {
-            coap_response = handle_delete_request(&regpath, endpoint, received_coap_header);
         }
-
-    } else  {
-        if (COAP_MSG_CODE_REQUEST_POST == received_coap_header->msg_code && !strcmp(resource_name, "bs")) {
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+        else {
+            // only execute requests are supported without registry
+            msg_code = COAP_MSG_CODE_RESPONSE_NOT_FOUND; // 4.04
+        }
+#endif
+    } else {
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+        if (COAP_MSG_CODE_REQUEST_POST == received_coap_header->msg_code &&
+            0 == memcmp(received_coap_header->uri_path_ptr, "bs", received_coap_header->uri_path_len)) {
             msg_code = COAP_MSG_CODE_RESPONSE_CHANGED;
             tr_info("handle_coap_request() Sending event ENDPOINT_EVENT_BOOTSTRAP_READY");
             endpoint_send_event(endpoint, ENDPOINT_EVENT_BOOTSTRAP_READY, received_coap_header->coap_status);
-        } else {
+        } else
+#endif
+        {
             tr_warn("handle_coap_request() - Path parsing failed.");
             msg_code = COAP_MSG_CODE_RESPONSE_NOT_FOUND; // 4.04
         }
@@ -1020,9 +1059,17 @@ bool handle_coap_response(endpoint_t* endpoint, sn_coap_hdr_s *received_coap_hea
         }
         endpoint->confirmable_response.pending = false;
         endpoint->confirmable_response.msg_id = 0;
-        if (endpoint->confirmable_response.notify_result
-                && registry_get_callback(&endpoint->registry, &endpoint->confirmable_response.path, &callback) == REGISTRY_STATUS_OK) {
-            callback(REGISTRY_CALLBACK_EXECUTE, &endpoint->confirmable_response.path, NULL, NULL, NOTIFICATION_STATUS_DELIVERED, &endpoint->registry);
+        if (endpoint->confirmable_response.notify_result) {
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+            if (registry_get_callback(&endpoint->registry, &endpoint->confirmable_response.path, &callback) == REGISTRY_STATUS_OK) {
+                callback(REGISTRY_CALLBACK_EXECUTE, &endpoint->confirmable_response.path, NULL, NULL, NOTIFICATION_STATUS_DELIVERED, &endpoint->registry);
+            }
+#else
+            callback = endpoint_get_object_callback(endpoint, endpoint->confirmable_response.path.object_id);
+            if (callback) {
+                callback(REGISTRY_CALLBACK_EXECUTE, &endpoint->confirmable_response.path, NULL, NULL, NOTIFICATION_STATUS_DELIVERED, endpoint);
+            }
+#endif
         }
         send_queue_sent(endpoint, true);
 
@@ -1030,6 +1077,7 @@ bool handle_coap_response(endpoint_t* endpoint, sn_coap_hdr_s *received_coap_hea
 
     }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     if (received_coap_header->msg_type == COAP_MSG_TYPE_RESET) {
 
         return handle_coap_notification_response(&endpoint->registry, received_coap_header, NOTIFICATION_STATUS_UNSUBSCRIBED);
@@ -1045,11 +1093,21 @@ bool handle_coap_response(endpoint_t* endpoint, sn_coap_hdr_s *received_coap_hea
         }
 
     }
+#else
+    if (received_coap_header->coap_status == COAP_STATUS_BUILDER_MESSAGE_SENDING_FAILED) {
+        callback = endpoint_get_object_callback(endpoint, endpoint->confirmable_response.path.object_id);
+        if (callback) {
+            callback(REGISTRY_CALLBACK_EXECUTE, &endpoint->confirmable_response.path, NULL, NULL, NOTIFICATION_STATUS_SEND_FAILED, endpoint);
+        }
+        endpoint_send_event(endpoint, ENDPOINT_EVENT_ERROR_TIMEOUT, received_coap_header->coap_status);
+    }
+#endif
 
     return false;
 
 }
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static bool handle_coap_notification_response(registry_t* registry, sn_coap_hdr_s *received_coap_header, registry_notification_status_t notification_status)
 {
 
@@ -1085,6 +1143,7 @@ static bool handle_coap_notification_response(registry_t* registry, sn_coap_hdr_
     return true;
 
 }
+#endif // !defined(MBED_CLOUD_CLIENT_DISABLE_REGISTRY)
 
 void send_execute_response(const registry_path_t* path,
                            endpoint_t *endpoint,
@@ -1135,11 +1194,19 @@ void response_message_send(endpoint_t *endpoint)
         send_queue_sent(endpoint, true);
         endpoint->confirmable_response.pending = false;
         endpoint->confirmable_response.msg_id = 0;
-        if(endpoint->confirmable_response.notify_result
-                && registry_get_callback(&endpoint->registry, &endpoint->confirmable_response.path, &callback) == REGISTRY_STATUS_OK) {
-
-            callback(REGISTRY_CALLBACK_EXECUTE, &endpoint->confirmable_response.path, NULL, NULL, NOTIFICATION_STATUS_SEND_FAILED, &endpoint->registry);
+        if (endpoint->confirmable_response.notify_result) {
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+            if (registry_get_callback(&endpoint->registry, &endpoint->confirmable_response.path, &callback) == REGISTRY_STATUS_OK) {
+                callback(REGISTRY_CALLBACK_EXECUTE, &endpoint->confirmable_response.path, NULL, NULL, NOTIFICATION_STATUS_SEND_FAILED, &endpoint->registry);
+            }
+#else
+            callback = endpoint_get_object_callback(endpoint, endpoint->confirmable_response.path.object_id);
+            if (callback) {
+                callback(REGISTRY_CALLBACK_EXECUTE, &endpoint->confirmable_response.path,  NULL, NULL, NOTIFICATION_STATUS_SEND_FAILED, endpoint);
+            }
+#endif
         }
+
     } else {
         endpoint->confirmable_response.msg_id = coap_response.msg_id;
     }

@@ -18,6 +18,109 @@
 #ifndef PROTOMAN_LAYER_H
 #define PROTOMAN_LAYER_H
 
+/**
+ * \file protoman_layer.h
+ * \ingroup protoman
+ * \brief Protocol Manager layer API.
+ *
+ * In Protocol Manager, you can dynamically append layers on top of each other to
+ * create protocol stacks for different purposes. Each layer will operate on
+ * the data that the layer below it provides. Usually each layer will either
+ * handle one header on a specific protol, or encryption, and provide the payload
+ * for upstream layer to process. Each layer is independant and requires no knowledge
+ * of layers below, or above them.
+ *
+ * Layer API is where the Protocol Manager is extended, so it is consideres as a porting API as well.
+ * You may provide your own implementation of platform specific socket layer, or provide another protocol
+ *
+ * Layers are defined by creating \ref protoman_layer_s structure, and registered to Protocol Manager with a call to
+ * protoman_add_layer().
+ * Each layer implementation is internally an event driven state machine. State transitions and data flow are
+ * all a result of Protocol Manager calling one of the defined callback functions from \ref protoman_layer_callbacks_s which
+ * is part of the \ref protoman_layer_s structure.
+ *
+ * <h3>Protocol layer state flow</h3>
+ *
+ * Each layer added to Protocol Manager instance, will have the same state flow. When you call protoman_connect(), it initiates the
+ * state transitions that run all layers to `PROTOMAN_STATE_CONNECTED` state which will allow the data to be pushed through the
+ * stack.
+ *
+ * @startuml
+ *      PROTOMAN_STATE_INIT: - All layers are initialzied
+ *      PROTOMAN_STATE_INIT: - Starts immediately after layer creation
+ *      PROTOMAN_STATE_INIT: - No data is moving
+ *      PROTOMAN_STATE_DISCONNECTED: - Layers are initialized but not connected
+ *      PROTOMAN_STATE_DISCONNECTED: - No data is moving
+ *      PROTOMAN_STATE_CONNECTING: - Layers are connected from bottom to up
+ *      PROTOMAN_STATE_CONNECTING: - Data is moving
+ *      PROTOMAN_STATE_CONNECTED: - Data is moving
+ *      PROTOMAN_STATE_DISCONNECTING: - Layers are disconnected from top to bottom
+ *      PROTOMAN_STATE_DISCONNECTING: - Data is moving
+ *      PROTOMAN_STATE_ERROR: - A layer is in unrecoverable state
+ *      PROTOMAN_STATE_ERROR: - The stack is in unrecoverable state
+ *
+ *      [*] --> PROTOMAN_STATE_INIT
+ *      PROTOMAN_STATE_INIT --> PROTOMAN_STATE_DISCONNECTED: All layers initialized
+ *      PROTOMAN_STATE_DISCONNECTED --> PROTOMAN_STATE_CONNECTING: protoman_connect();
+ *      PROTOMAN_STATE_CONNECTING --> PROTOMAN_STATE_CONNECTED
+ *      PROTOMAN_STATE_CONNECTED --> PROTOMAN_STATE_CONNECTING: re-connection
+ *      PROTOMAN_STATE_CONNECTED --> PROTOMAN_STATE_DISCONNECTING: protoman_disconnect();
+ *      PROTOMAN_STATE_DISCONNECTING --> PROTOMAN_STATE_DISCONNECTED
+ *
+ *      PROTOMAN_STATE_INIT          --> PROTOMAN_STATE_ERROR
+ *      PROTOMAN_STATE_CONNECTING    --> PROTOMAN_STATE_ERROR
+ *      PROTOMAN_STATE_CONNECTED     --> PROTOMAN_STATE_ERROR
+ *      PROTOMAN_STATE_DISCONNECTING --> PROTOMAN_STATE_ERROR
+ *      PROTOMAN_STATE_DISCONNECTED  --> PROTOMAN_STATE_ERROR
+ * @enduml
+ *
+ * Protocol Manager has defined set of callbacks, one per each state, that it calls when it requires the layer to take any actions.
+ * Protocol Manager is event based, so when someting is happening, it is usually a result of calling
+ * protoman_add_layer() when layer is added, protoman_connect() when application initiates the connection phase, or some
+ * layer requests processing time by calling protoman_event() with PROTOMAN_EVENT_RUN as a event type.
+ *
+ * Callbacks defined in protoman_layer_callbacks_s are as follows:
+ *  Current state  | callback that Protocol manager uses
+ * ------------- | -------------
+ * PROTOMAN_STATE_INIT | protoman_layer_callbacks_s::state_do_init
+ * PROTOMAN_STATE_DISCONNECTED or \n PROTOMAN_STATE_CONNECTING | protoman_layer_callbacks_s::state_do_connect
+ * PROTOMAN_STATE_CONNECTED | protoman_layer_callbacks_s::state_do_read
+ * PROTOMAN_STATE_CONNECTED | protoman_layer_callbacks_s::state_do_write
+ * PROTOMAN_STATE_CONNECTED | protoman_layer_callbacks_s::state_do_disconnect
+ * PROTOMAN_STATE_CONNECTED | protoman_layer_callbacks_s::state_do_pause
+ * - | protoman_layer_callbacks_s::state_do_resume
+ *
+ * State transition may happen as a result of the callback, and defined by its return value.
+ * Each callback funtion follows \ref protoman_layer_state_do_cb_t prototype. As defined in the prototype, each state function
+ * may transition the layer state to next one, stay in the current state, or mark errors. See \ref protoman_layer_state_do_cb_t for
+ * exact return values.
+ *
+ * <h3>Data flow</h3>
+ *
+ * When connected, data can be read of written from the layer. Four callbacks are defined in protoman_layer_callbacks_s for the purpose.
+ * * protoman_layer_callbacks_s::state_do_read
+ * * protoman_layer_callbacks_s::state_do_write
+ * * protoman_layer_callbacks_s::layer_read
+ * * protoman_layer_callbacks_s::layer_write
+ *
+ * These four functions allow defining two distinct ways of delivering the data.
+ * Data flows either by result of events where bottom layer fetches the data and creates PROTOMAN_EVENT_DATA_AVAIL event for the layer above.
+ * Or the second option is that layer does generate PROTOMAN_EVENT_DATA_AVAIL but only fetches the data when protoman_layer_callbacks_s::layer_read is
+ * called.
+ *
+ * When layer implementation wants to use the model where it pre-fetches the data, two helper functions
+ * are provided protoman_generic_bytes_layer_read() and protoman_generic_bytes_layer_write() that can be used in the callback structure.
+ * They internally handle buffering for the layer. Then layer as a result of callback or timer from the actual platform
+ * may request processing time by calling protoman_event() with PROTOMAN_EVENT_RUN as a type. That eventually goes into state_do_read() function
+ * and when the data is finally available, protoman_event() with PROTOMAN_EVENT_DATA_AVAIL is issued. In this model, you only need to implement
+ * protoman_layer_callbacks_s::state_do_read and protoman_layer_callbacks_s::state_do_write.
+ *
+ * If you choose to implement a layer without pre-fetching the data, you may leave protoman_layer_callbacks_s::state_do_read and protoman_layer_callbacks_s::state_do_write()
+ * NULL, and implement all data handling into protoman_layer_callbacks_s::layer_read protoman_layer_callbacks_s::layer_write.
+ *
+ * \sa protoman
+ */
+
 #include <stdint.h>
 
 // Slightly ugly way to get ssize_t, but as the Mbed OS already has it we better use it from there.
@@ -87,6 +190,7 @@ struct protoman_io_bytes_s {
     size_t len;
 };
 
+/** Delay configuration structure */
 struct protoman_layer_run_delays_s {
     uint32_t do_init;         /* Delay to wait if do_init()       returns PROTOMAN_STATE_RETVAL_AGAIN */
     uint32_t do_connect;      /* Delay to wait if do_connect())   returns PROTOMAN_STATE_RETVAL_AGAIN */
@@ -97,39 +201,43 @@ struct protoman_layer_run_delays_s {
     uint32_t do_resume;       /* Delay to wait if do_pause()      returns PROTOMAN_STATE_RETVAL_AGAIN */
 };
 
+/**
+ * Protocol layer configuration structure.
+ * \sa protoman_layer.h
+ */
 struct protoman_layer_s {
-    void *ctx;
-    const char *name;
-    int current_state;    /* This is internal state for the layer */
-    int target_state;     /* This is a state the layer drives towards */
-    int perceived_state;  /* This is a state how ProtocolManager perceives the layer (layer does not edit) */
-    bool no_statemachine; /* not all layers have state machines */
+    void *ctx;            /**< Optional implementation specific context handle, not used by Protocol Manager internally. */
+    const char *name;     /**< Layer name for debugging purposes */
+    int current_state;    /**< This is internal state for the layer */
+    int target_state;     /**< This is a state the layer drives towards */
+    int perceived_state;  /**< This is a state how ProtocolManager perceives the layer (layer does not edit) */
+    bool no_statemachine; /**< not all layers have state machines */
 
-    int protoman_error;   /* protoman translated error */
-    int specific_error;   /* implementation specific error */
+    int protoman_error;   /**< protoman translated error */
+    int specific_error;   /**< implementation specific error */
 #ifdef PROTOMAN_ERROR_STRING
-    const char *specific_error_str; /* implementation specific verbal error */
+    const char *specific_error_str; /**< implementation specific verbal error */
 #endif // PROTOMAN_ERROR_STRING
 
-    void *config;
+    void *config;        /**< Can be requested with protoman_get_config() */
 
-    uint8_t *rx_buf; /* holds current layer's read data (others ask here) */
-    ssize_t rx_len;
-    size_t rx_offset;
+    uint8_t *rx_buf;    /**< Payload buffer, to be requested by upper layer. */
+    ssize_t rx_len;     /**< Length of data currently in buffer */
+    size_t rx_offset;   /**< offset of payload in rx_buf */
 
-    uint8_t *tx_buf; /* holds current layer output data */
+    uint8_t *tx_buf;    /**< holds current layer output data */
     ssize_t tx_len;
     size_t tx_offset;
 
-    const struct protoman_layer_callbacks_s *callbacks;
-    const struct protoman_layer_run_delays_s *delays;
+    const struct protoman_layer_callbacks_s *callbacks; /**< Layer callbacks */
+    const struct protoman_layer_run_delays_s *delays;   /**< Delay configurations */
 
     void *timer_event;
 
     struct protoman_event_storage_s protoman_event_storage;
 
-    struct protoman_s *protoman; /* parent */
-    ns_list_link_t link;
+    struct protoman_s *protoman; /**< Pointer to Protocol Manager instance */
+    ns_list_link_t link;         /**< Linked list pointer */
 };
 
 struct protoman_config_tls_common_s {
@@ -243,6 +351,12 @@ struct protoman_config_packet_split_s {
 #define protoman_layer_record_error(layer, err, serr, estr) _protoman_layer_record_error(layer, err, serr, (const char*)NULL)
 #endif // PROTOMAN_ERROR_STRING
 
+#if !defined CPPUTEST_COMPILATION
+#define PROTOMAN_INLINE inline
+#else
+#define PROTOMAN_INLINE
+#endif
+
 /**
  * Stores an error state to the given layer.
  * @param layer Pointer to the layer.
@@ -250,7 +364,47 @@ struct protoman_config_packet_split_s {
  * @param specific_error Component specific error.
  * @param specific_error_str Component specific error string.
  */
-void _protoman_layer_record_error(struct protoman_layer_s *layer, int protoman_error, int specific_error, const char *specific_error_str);
+PROTOMAN_INLINE void _protoman_layer_record_error(struct protoman_layer_s *layer,
+                                  int protoman_error,
+                                  int specific_error,
+                                  const char *specific_error_str);
+
+#ifdef PROTOMAN_VERBOSE
+/**
+ * Traces an error state on a given layer
+ * @param layer Pointer to the layer.
+ * @param protoman_error Error translated to protoman error.
+ * @param specific_error Component specific error.
+ * @param specific_error_str Component specific error string.
+ */
+void _protoman_layer_trace_error(struct protoman_layer_s *layer,
+                                int protoman_error,
+                                int specific_error,
+                                const char *specific_error_str);
+#endif
+
+/* Provide definitions, either for inlining, or for protoman_layer.c */
+#if !defined CPPUTEST_COMPILATION || defined PROTOMAN_FN
+#ifndef PROTOMAN_FN
+#define PROTOMAN_FN PROTOMAN_INLINE
+#endif
+
+PROTOMAN_FN void _protoman_layer_record_error(struct protoman_layer_s *layer,
+                                                int protoman_error,
+                                                int specific_error,
+                                                const char *specific_error_str)
+{
+#ifdef PROTOMAN_ERROR_STRING
+    layer->specific_error_str = specific_error_str;
+#endif // PROTOMAN_ERROR_STRING
+    layer->protoman_error = protoman_error;
+    layer->specific_error = specific_error;
+
+#ifdef PROTOMAN_VERBOSE
+    _protoman_layer_trace_error(layer, protoman_error, specific_error, specific_error_str);
+#endif
+}
+#endif /* !defined CPPUTEST_COMPILATION || defined PROTOMAN_FN */
 
 /**
  *  Generic layer state change logic which generates events to above layers.
@@ -377,19 +531,25 @@ typedef void* (*protoman_layer_info_t)(struct protoman_layer_s *layer, int info_
  */
 typedef int (*protoman_layer_state_do_cb_t)(struct protoman_layer_s *layer);
 
+/**
+ * Define layer callbacks.
+ * Some members may be left NULL when marked as OPTIONAL.
+ * Some helper functions are provided.
+ * Usually protoman_generic_layer_run() is used as layer_event. protoman_generic_bytes_layer_write() and protoman_generic_bytes_layer_read() may be used for layer_read and layer_write.
+ */
 struct protoman_layer_callbacks_s {
-    protoman_layer_info_t       layer_info;
-    protoman_layer_read_t       layer_read;
-    protoman_layer_write_t      layer_write;
-    protoman_layer_event_t      layer_event;
-    protoman_layer_free_t       layer_free;
-    protoman_layer_state_do_cb_t state_do_init;
-    protoman_layer_state_do_cb_t state_do_connect;
-    protoman_layer_state_do_cb_t state_do_read;
-    protoman_layer_state_do_cb_t state_do_write;
-    protoman_layer_state_do_cb_t state_do_disconnect;
-    protoman_layer_state_do_cb_t state_do_pause;
-    protoman_layer_state_do_cb_t state_do_resume;
+    protoman_layer_info_t       layer_info;             /**< OPTIONAL: Get layer information. */
+    protoman_layer_read_t       layer_read;             /**< Read data from layer. */
+    protoman_layer_write_t      layer_write;            /**< Write data into the layer. */
+    protoman_layer_event_t      layer_event;            /**< OPTIONAL: Layer specific event handler. */
+    protoman_layer_free_t       layer_free;             /**< OPTIONAL: Free all memory allocated by layer. */
+    protoman_layer_state_do_cb_t state_do_init;         /**< OPTIONAL: Called from protoman_generic_layer_run() on Initialization phase. */
+    protoman_layer_state_do_cb_t state_do_connect;      /**< OPTIONAL: Called from protoman_generic_layer_run() when connection is requested. */
+    protoman_layer_state_do_cb_t state_do_read;         /**< OPTIONAL: Called from protoman_generic_layer_run() when in connected state and PROTOMAN_EVENT_RUN issued. */
+    protoman_layer_state_do_cb_t state_do_write;        /**< OPTIONAL: Called from protoman_generic_layer_run() when in connected state and PROTOMAN_EVENT_RUN issued. */
+    protoman_layer_state_do_cb_t state_do_disconnect;   /**< OPTIONAL: Called from protoman_generic_layer_run() when disconnection is requested. */
+    protoman_layer_state_do_cb_t state_do_pause;        /**< OPTIONAL: Called from protoman_generic_layer_run() when protoman_pause() called. */
+    protoman_layer_state_do_cb_t state_do_resume;       /**< OPTIONAL: Called from protoman_generic_layer_run() when protoman_resume() called. */
 };
 
 #ifdef __cplusplus

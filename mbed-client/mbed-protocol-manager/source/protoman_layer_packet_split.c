@@ -87,8 +87,11 @@ static void layer_event(struct protoman_layer_s *layer, int event_id)
 void protoman_add_layer_packet_split(struct protoman_s *protoman, struct protoman_layer_s *layer)
 {
     struct protoman_layer_packet_split_s *layer_packet_split = (struct protoman_layer_packet_split_s *)layer;
-
+#ifdef MBED_CONF_MBED_TRACE_ENABLE
     layer->name = "Packet Split"; // must be set before first print from this layer
+#else
+    layer->name = NULL;
+#endif
 
     protoman_debug("");
 

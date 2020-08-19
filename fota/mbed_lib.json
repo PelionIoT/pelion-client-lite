@@ -22,9 +22,9 @@
             "macro_name": "MBED_CLOUD_CLIENT_FOTA_ENCRYPTION_SUPPORT",
             "value": null
         },
-        "encryption-block-size": {
-            "help": "FW candidate encryption block size - only relevant if fota.encryption-support is true",
-            "macro_name": "MBED_CLOUD_CLIENT_FOTA_ENCRYPT_BLOCK_SIZE",
+        "candidate-block-size": {
+            "help": "FW candidate block size in storage - only relevant if encrypted or if resume is supported",
+            "macro_name": "MBED_CLOUD_CLIENT_FOTA_CANDIDATE_BLOCK_SIZE",
             "value": 1024
         },
         "trace-enable": {
@@ -40,16 +40,11 @@
         "app-default-cb-no-print": {
             "help": "Disable prints in default implementation of application callbacks code",
             "macro_name": "FOTA_APP_DEFAULT_CB_NO_PRINT",
-            "value": null
+            "value": 1
         },
         "is-bootloader": {
             "help": "True when FOTA runs from bootloader",
             "macro_name": "FOTA_IS_BOOTLOADER",
-            "value": null
-        },
-        "simulate-random": {
-            "help": "Enable simulation of random generation code",
-            "macro_name": "FOTA_SIMULATE_RANDOM",
             "value": null
         },
         "fi-mitigation-enable": {
@@ -61,6 +56,12 @@
             "help": "Number of updateable components (including main firmware). Up to 8.",
             "macro_name": "FOTA_NUM_COMPONENTS",
             "value": 1
+        },
+        "resume-support": {
+            "help": "Type of resume support: unsupported, restart only, resume",
+            "macro_name": "MBED_CLOUD_CLIENT_FOTA_RESUME_SUPPORT",
+            "accepted_values": ["FOTA_RESUME_UNSUPPORTED", "FOTA_RESUME_SUPPORT_RESTART", "FOTA_RESUME_SUPPORT_RESUME"],
+            "value": "FOTA_RESUME_SUPPORT_RESUME"
         },
         "delta-block-size": {
             "help": "size of bsdiff blocks used to create delta-update",

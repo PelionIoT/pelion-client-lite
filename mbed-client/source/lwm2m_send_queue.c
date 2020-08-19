@@ -17,7 +17,7 @@
 #include "lwm2m_endpoint.h"
 #include "lwm2m_notifier.h"
 #include "lwm2m_registry_handler.h"
-#include "lwm2m_get_req_handler.h"
+#include "lwm2m_req_handler.h"
 #include "lwm2m_send_queue.h"
 #include "mbed-trace/mbed_trace.h"
 
@@ -152,12 +152,14 @@ void send_queue_send_next(struct endpoint_s *endpoint)
 
         case SEND_QUEUE_NOTIFIER:
             tr_debug("send_queue_send_next() notifier");
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
             notifier_send_now(&endpoint->notifier);
+#endif
             break;
 
         case SEND_QUEUE_REQUEST:
             tr_debug("send_queue_send_next() get");
-            get_handler_send_message(endpoint);
+            req_handler_send_message(endpoint);
             break;
 
         case SEND_QUEUE_COAP_PING:

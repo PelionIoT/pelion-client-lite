@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -21,7 +21,6 @@
 
 #include "fota/fota_base.h"
 #include "fota/fota_crypto_defs.h"
-#include "fota/fota_manifest_defs.h"
 #include "fota/fota_component.h"
 
 #ifdef __cplusplus
@@ -34,6 +33,9 @@ extern "C" {
 #define FOTA_MANIFEST_TRACE_DEBUG(fmt, ...)
 #endif
 
+#define FOTA_MANIFEST_PAYLOAD_FORMAT_RAW    1
+#define FOTA_MANIFEST_PAYLOAD_FORMAT_DELTA  5
+
 /*
  * Update details as extracted from the Pelion FOTA manifest
  */
@@ -42,16 +44,19 @@ typedef struct {
     uint32_t       priority;                                     /*< Update priority. */
     uint32_t       payload_format;                               /*< Payload format. */
     uint32_t       payload_size;                                 /*< Payload size to be downloaded. */
+    uint32_t       installed_size;                               /*< Installed FW size. In case payload_format equals FOTA_MANIFEST_PAYLOAD_FORMAT_RAW  the value is equal to payload_size. */
     uint8_t        payload_digest[FOTA_CRYPTO_HASH_SIZE];        /*< Payload SHA226 digest - for verifying downloaded payload integrity. */
     char           uri[FOTA_MANIFEST_URI_SIZE];                  /*< Payload URI for downloading the payload. */
-    uint32_t       installed_size;                               /*< Installed FW size. In case payload_format equals FOTA_MANIFEST_PAYLOAD_FORMAT_RAW  the value is equal to payload_size. */
     uint8_t        installed_digest[FOTA_CRYPTO_HASH_SIZE];      /*< Installed FW SHA256 digest. In case payload_format equals FOTA_MANIFEST_PAYLOAD_FORMAT_RAW  the value is equal to payload_digest. */
     uint8_t        precursor_digest[FOTA_CRYPTO_HASH_SIZE];      /*< Currently installed (before update) FW SHA256 digest.*/
     char           component_name[FOTA_COMPONENT_MAX_NAME_SIZE]; /*< Component name */
     uint8_t        vendor_data[FOTA_MANIFEST_VENDOR_DATA_SIZE];  /*< Vendor custom data as received in Pelion FOTA manifest. */
+#if defined(MBED_CLOUD_CLIENT_FOTA_SIGNED_IMAGE_SUPPORT)
+    uint8_t        installed_signature[FOTA_IMAGE_RAW_SIGNATURE_SIZE]; /** Raw encoded signature over installed image */
+#endif  // defined(MBED_CLOUD_CLIENT_FOTA_SIGNED_IMAGE_SUPPORT)
+
 } manifest_firmware_info_t;
 
-typedef struct mbedtls_x509_crt mbedtls_x509_crt;
 /*
  * Parse and validate Pelion FOTA manifest.
  *
@@ -60,15 +65,13 @@ typedef struct mbedtls_x509_crt mbedtls_x509_crt;
  * \param[in]  manifest_buf      Pionter to a buffer holding Pelion FOTA manifest to be parsed
  * \param[in]  manifest_size     Input manifest size
  * \param[out] fw_info           Pointer to a struct holding update details
- * \param[in]  cert              X.509 certificate for verifying FOTA Manifest authenticity
  * \param[in]  current_fw_digest Currently installed FW SHA256 digest - required for asserting precursor digest
  * \return FOTA_STATUS_SUCCESS on success
  */
 int fota_manifest_parse(
     const uint8_t *manifest_buf,
     size_t manifest_size,
-    manifest_firmware_info_t *fw_info,
-    mbedtls_x509_crt *cert);
+    manifest_firmware_info_t *fw_info);
 
 #ifdef __cplusplus
 }

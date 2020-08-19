@@ -76,8 +76,11 @@ static const char* _str_state(int state)
 void protoman_add_layer_frame_lv(struct protoman_s *protoman, struct protoman_layer_s *layer)
 {
     struct protoman_layer_frame_lv_s *layer_frame_lv = (struct protoman_layer_frame_lv_s *)layer;
-
+#ifdef MBED_CONF_MBED_TRACE_ENABLE
     layer->name = "LV Frame"; // must be set before first print from this layer
+#else
+    layer->name = NULL;
+#endif
 
     protoman_debug("");
 

@@ -46,8 +46,11 @@ static const struct protoman_layer_callbacks_s callbacks = {
 void protoman_add_layer_drop(struct protoman_s *protoman, struct protoman_layer_s *layer)
 {
     struct protoman_layer_drop_s *layer_drop = (struct protoman_layer_drop_s *)layer;
-
+#ifdef MBED_CONF_MBED_TRACE_ENABLE
     layer->name = "Drop"; // must be set before first print from this layer
+#else
+    layer->name = NULL;
+#endif
 
     protoman_debug("");
 

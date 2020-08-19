@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -44,6 +44,8 @@ typedef enum {
     FOTA_STATUS_FW_DOWNLOAD_TIMEOUT           = -15,  /**< timed out downloading asset */
     FOTA_STATUS_FW_UNSUPPORTED_DELTA_FORMAT   = -16,  /**< unsupported delta format */
     FOTA_STATUS_FW_UNSUPPORTED_ENCRYPT_FORMAT = -17,  /**< unsupported encryption format */
+    FOTA_STATUS_FW_DELTA_REQUIRED_MORE_DATA   = -18,  /**< delta engine requred more data to proceed */
+
 
 
     FOTA_STATUS_MANIFEST_PAYLOAD_CORRUPTED    = -102, /**< payload digest does not match to the one specified by manifest */
@@ -57,11 +59,13 @@ typedef enum {
     FOTA_STATUS_MANIFEST_WRONG_CLASS_ID       = -216, /**< manifest with wrong class id */
     FOTA_STATUS_MANIFEST_INVALID_SIZE         = -217, /**< malformed manifest - invalid size */
     FOTA_STATUS_MANIFEST_WRITE_ERROR          = -227, /**< manifest processing error, write error */
+    FOTA_STATUS_MANIFEST_SEMVER_ERROR         = -228,  /**< error parsing semantic version */
 
     FOTA_STATUS_SOURCE_STATE_UPDATE_ERROR     = -310, /**< resource fetching, user-defined error 2 **/
     FOTA_STATUS_RESOURCE_NOT_AVAILABLE        = -311, /**< resource fetching, user-defined error 3 **/
     FOTA_STATUS_UNEXPECTED_COMPONENT          = -312, /**< resource fetching, user-defined error 5 **/
     FOTA_STATUS_DOWNLOAD_AUTH_NOT_GRANTED     = -313, /**< application rejected download authorization request */
+    FOTA_STATUS_FW_INSTALLATION_FAILED        = -314, /**< update failed at installation phase */
 
     FOTA_STATUS_FW_SIZE_MISMATCH              = -400, /**< payload processing, nonspecific error */
     FOTA_STATUS_STORAGE_READ_FAILED           = -401, /**< payload processing, user-defined error 1 **/
@@ -77,6 +81,7 @@ typedef enum {
     FOTA_STATUS_INTERNAL_ERROR                = -509, /**< payload writing error, user-defined error 4 **/
     FOTA_STATUS_INVALID_ARGUMENT              = -510, /**< payload writing error, user-defined error 5 **/
     FOTA_STATUS_INSTALL_AUTH_NOT_GRANTED      = -511, /**< application rejected install authorization request */
+    FOTA_STATUS_INSTALL_DEFER_UNSUPPORTED     = -513, /**< application deferred install when not supported */
 
 } fota_status_e;
 

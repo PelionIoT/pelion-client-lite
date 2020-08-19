@@ -68,10 +68,7 @@
 #define TRACE_PATCH_CONTROL_READ(...)
 #endif  // BS_DEBUG
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wlong-long"
 #include "lz4.h"
-#pragma GCC diagnostic pop
 
 #define MIN(x,y) (((x)<(y)) ? (x) : (y))
 
@@ -81,30 +78,30 @@
 #define BS_PATCH_HEADERLEN 8
 
 // internal helper functions for BS Patching
-int bspatch_readInitialHeaderAndContinue(struct bspatch_stream *stream);
+bs_patch_api_return_code_t bspatch_readInitialHeaderAndContinue(struct bspatch_stream *stream);
 
-int bspatch_allocWorkingBuffers(struct bspatch_stream *stream);
+bs_patch_api_return_code_t bspatch_allocWorkingBuffers(struct bspatch_stream *stream);
 
 //int read_controldata(struct bspatch_stream* stream);
 //int read_controldata_header(struct bspatch_stream* stream);
 int read_controldata_process(struct bspatch_stream *stream);
-int sendPatchReadRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length);
-int bspatch_readInitialHeaderAndContinueReadOfPatchDone(struct bspatch_stream *stream);
-int read_deCompressBuffer_process(struct bspatch_stream *stream, int64_t frame_len);
+bs_patch_api_return_code_t sendPatchReadRequest(const struct bspatch_stream *stream, void *buffer, uint32_t length);
+bs_patch_api_return_code_t bspatch_readInitialHeaderAndContinueReadOfPatchDone(struct bspatch_stream *stream);
+bs_patch_api_return_code_t read_deCompressBuffer_process(struct bspatch_stream *stream, uint32_t frame_len);
 //void process_read_frame_len(struct bspatch_stream* stream);
-int bspatch_processSingeExtraStrLenCompress(struct bspatch_stream *stream);
+bs_patch_api_return_code_t bspatch_processSingeExtraStrLenCompress(struct bspatch_stream *stream);
 int setExpectedExternalEventByState(struct bspatch_stream *stream, int status, bs_patch_state_t nextState,
                                     bs_patch_api_event_t expectedExternalEvent);
 
 // api to hide direct function pointer usage, return code will indicate either async completion synch completion or error
-int sendWriteNewRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length);
-int sendSeekOldRequest(const struct bspatch_stream *stream, int64_t seek_diff);
-int sendReadOldRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length);
-int bspatch_processDiffBytesPost(struct bspatch_stream *stream);
+bs_patch_api_return_code_t sendWriteNewRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length);
+bs_patch_api_return_code_t sendSeekOldRequest(const struct bspatch_stream *stream, int64_t seek_diff);
+bs_patch_api_return_code_t sendReadOldRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length);
+bs_patch_api_return_code_t bspatch_processDiffBytesPost(struct bspatch_stream *stream);
 
 int isPatchingDone(bspatch_stream *stream);
 uint64_t allignTo8ByteBoundary(uint64_t address);
-int readVarIntEventified(struct bspatch_stream *stream, int isSigned);
+bs_patch_api_return_code_t readVarIntEventified(struct bspatch_stream *stream, int isSigned);
 
 #if PATCH_STAT_COUNTING
 // note stats counting is now partly broken as varint are not calcualted correctly to header stats
@@ -206,7 +203,7 @@ static int64_t offtin(uint8_t *buf)
  * @param plain_done the amount of bytes that was dedeCompressBuffer from frame
  * @return 0 if succesfull, BSPATCH error code if failure.
  */
-static int read_deCompressBuffer(struct bspatch_stream *stream, int64_t frame_len)
+static bs_patch_api_return_code_t read_deCompressBuffer(struct bspatch_stream *stream, uint32_t frame_len)
 {
     if (frame_len > stream->max_deCompressBuffer) {
         return EBSAPI_ERR_CORRUPTED_PATCH;
@@ -238,12 +235,12 @@ static int read_deCompressBuffer(struct bspatch_stream *stream, int64_t frame_le
  }
  */
 
-int read_deCompressBuffer_process(struct bspatch_stream *stream, int64_t frame_len)
+bs_patch_api_return_code_t read_deCompressBuffer_process(struct bspatch_stream *stream, uint32_t frame_len)
 {
     stream->undeCompressBuffer_len = LZ4_decompress_safe((char *) stream->bufferForCompressedData,
-                                                         (char *) stream->nonCompressedDataBuffer, frame_len, stream->max_compressedDataBuffer);
+                                                         (char *) stream->nonCompressedDataBuffer, (int)frame_len, (int)stream->max_compressedDataBuffer);
 
-    return stream->undeCompressBuffer_len > 0 ? 0 : EBSAPI_ERR_CORRUPTED_PATCH;
+    return stream->undeCompressBuffer_len > 0 ? EBSAPI_OPERATION_DONE_IMMEDIATELY : EBSAPI_ERR_CORRUPTED_PATCH;
 }
 
 int read_controldata_process(struct bspatch_stream *stream)
@@ -291,9 +288,9 @@ uint64_t allignTo8ByteBoundary(uint64_t address)
     return address;
 }
 
-int bspatch_allocWorkingBuffers(struct bspatch_stream *stream)
+bs_patch_api_return_code_t bspatch_allocWorkingBuffers(struct bspatch_stream *stream)
 {
-    int result = 0;
+    bs_patch_api_return_code_t result = EBSAPI_OPERATION_DONE_IMMEDIATELY;
 
     if (!stream) {
         return EBSAPI_ERR_PARAMETERS;
@@ -344,18 +341,16 @@ int bspatch_allocWorkingBuffers(struct bspatch_stream *stream)
 #endif // BS_PATCH_COMPILE_TIME_MEMORY_ALLOC
 }
 
-int bspatch_processDiffBytesPost(struct bspatch_stream *stream)
+bs_patch_api_return_code_t bspatch_processDiffBytesPost(struct bspatch_stream *stream)
 {
     /* Adjust pointers */
     stream->newpos += stream->ctrl[DIFF_STR_LEN_X];
-    return 0;
+    return EBSAPI_OPERATION_DONE_IMMEDIATELY;
 }
 
-int bspatch_processSingeExtraStrLenCompress(struct bspatch_stream *stream)
+bs_patch_api_return_code_t bspatch_processSingeExtraStrLenCompress(struct bspatch_stream *stream)
 {
-    int result = 0;
-
-    result = read_deCompressBuffer_process(stream, stream->frame_len);
+    bs_patch_api_return_code_t result = read_deCompressBuffer_process(stream, stream->frame_len);
 
     if (result) {
         return result;
@@ -365,27 +360,27 @@ int bspatch_processSingeExtraStrLenCompress(struct bspatch_stream *stream)
 }
 
 // onle there helpers should access function pointers in BS API
-int sendPatchReadRequest(const bspatch_stream *stream, void *buffer, uint64_t length)
+bs_patch_api_return_code_t sendPatchReadRequest(const bspatch_stream *stream, void *buffer, uint32_t length)
 {
     return stream->read_patch(stream, buffer, length);
 }
 
-int sendSeekOldRequest(const struct bspatch_stream *stream, int64_t seek_diff)
+bs_patch_api_return_code_t sendSeekOldRequest(const struct bspatch_stream *stream, int64_t seek_diff)
 {
     return stream->seek_old(stream, seek_diff);
 }
 
-int sendReadOldRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length)
+bs_patch_api_return_code_t sendReadOldRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length)
 {
     return stream->read_old(stream, buffer, length);
 }
 
-int sendWriteNewRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length)
+bs_patch_api_return_code_t sendWriteNewRequest(const struct bspatch_stream *stream, void *buffer, uint64_t length)
 {
     return stream->write_new(stream, buffer, length);
 }
 
-int bspatch_readInitialHeaderAndContinue(bspatch_stream *stream)
+bs_patch_api_return_code_t bspatch_readInitialHeaderAndContinue(bspatch_stream *stream)
 {
     if (stream->read_old == 0 || stream->read_patch == 0 || stream->seek_old == 0 || stream->write_new == 0) {
         return EBSAPI_ERR_PARAMETERS;
@@ -403,7 +398,7 @@ int bspatch_readInitialHeaderAndContinue(bspatch_stream *stream)
     }
 }
 
-int bspatch_readInitialHeaderAndContinueReadOfPatchDone(bspatch_stream *stream)
+bs_patch_api_return_code_t bspatch_readInitialHeaderAndContinueReadOfPatchDone(bspatch_stream *stream)
 {
     /* Check for appropriate magic */
     if (memcmp(stream->header, FILE_MAGIC, FILE_MAGIC_LEN) != 0) {
@@ -437,7 +432,7 @@ int bspatch_readInitialHeaderAndContinueReadOfPatchDone(bspatch_stream *stream)
             || stream->max_deCompressBuffer < 1) {
         return EBSAPI_ERR_CORRUPTED_PATCH;
     }
-    return 0;
+    return EBSAPI_OPERATION_DONE_IMMEDIATELY;
 }
 
 int setExpectedExternalEventByState(struct bspatch_stream *stream, int status, bs_patch_state_t nextState,
@@ -449,7 +444,6 @@ int setExpectedExternalEventByState(struct bspatch_stream *stream, int status, b
 
     switch (status) {
         case EBSAPI_OPERATION_DONE_IMMEDIATELY:
-            stream->expectedExternalEvent = 0;
             stream->next_state = nextState;
             return 0;
         case EBSAPI_OPERATION_PATCH_READ_WILL_COMPLETE_LATER:
@@ -463,7 +457,6 @@ int setExpectedExternalEventByState(struct bspatch_stream *stream, int status, b
             assert(0);
             return 1;
     }
-    return 1;
 }
 
 int isPatchingDone(bspatch_stream *stream)
@@ -519,12 +512,11 @@ bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream *stream, bs_p
 {
     if (bsApiEvent != stream->expectedExternalEvent) {
         return EBSAPI_ERR_UNEXPECTED_EVENT;
-    } else {
-        stream->expectedExternalEvent = 0; // received expected external event
     }
-    int status = 0;
+
+    bs_patch_api_return_code_t status = EBSAPI_OPERATION_DONE_IMMEDIATELY;
     do {
-        status = 0;
+        status = EBSAPI_OPERATION_DONE_IMMEDIATELY;
         //log("bs:state:%d\n", stream->next_state);
         switch (stream->next_state) {
             case EBsInitial:
@@ -534,20 +526,13 @@ bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream *stream, bs_p
                 break;
             case EBsInitialPatchReadDone:
                 status = bspatch_readInitialHeaderAndContinueReadOfPatchDone(stream);
-                SET_NEXT_STATE(EBsAllocWorkingBuffer)
-                // no patch data reading wait
-                break;
-            case EBsAllocWorkingBuffer:
+                if (status) {
+                    break;
+                }
                 status = bspatch_allocWorkingBuffers(stream);
-                /* next process patch and write to new file */
-                SET_NEXT_STATE(EBsReadControlSegmentHeader)
-                break;
-            case EBsReadControlSegmentHeader:
-                TRACE_PATCH_CONTROL_READ("EBsReadControlSegmentHeader\n");
-                SET_NEXT_STATE(EBsReadControlSegment)
-                break;
-            case EBsReadControlSegment:
-                TRACE_PATCH_CONTROL_READ("EBsReadControlSegment\n");
+                if (status) {
+                    break;
+                }
                 SET_NEXT_STATE(EReadCtrl_diff_str_len)
                 break;
             case EReadCtrl_diff_str_len:
@@ -636,7 +621,7 @@ bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream *stream, bs_p
                     status = sendReadOldRequest(stream, stream->bufferForCompressedData, /*1*/stream->readRequestSize);
                     WAIT_FOR_READ_OLD(EBspatch_processDiffBytes_processSinglePieceContinue_writePart); // recursive event to loopify
                 } else {
-                    status = 0;
+                    status = EBSAPI_OPERATION_DONE_IMMEDIATELY;
                     SET_NEXT_STATE(EBspatch_processDiffBytes_processSinglePieceContinue_postActions);
                 }
                 break;
@@ -653,7 +638,7 @@ bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream *stream, bs_p
                 break;
             case EBspatch_processDiffBytes_processSinglePieceContinue_postActions:
                 stream->total_undeCompressBuffer += stream->undeCompressBuffer_len;
-                status = 0;
+                status = EBSAPI_OPERATION_DONE_IMMEDIATELY;
                 if (stream->total_undeCompressBuffer < stream->ctrl[DIFF_STR_LEN_X]) {
                     SET_NEXT_STATE(EBspatch_processDiffBytes_readHeaderPiece);
                 } else {
@@ -663,7 +648,7 @@ bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream *stream, bs_p
                 break;
             case EBsProcessExtraLen:
                 // Sanity-check
-                status = 0;
+                status = EBSAPI_OPERATION_DONE_IMMEDIATELY;
                 if (stream->newpos + stream->ctrl[EXTRA_STR_LEN_Y] > stream->new_size) {
                     status = EBSAPI_ERR_CORRUPTED_PATCH;
                     break;
@@ -706,7 +691,7 @@ bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream *stream, bs_p
                 // Adjust pointers
                 stream->newpos += stream->ctrl[EXTRA_STR_LEN_Y];
                 status = sendSeekOldRequest(stream, stream->ctrl[OLD_FILE_CTRL_OFF_SET_JUMP]);
-                WAIT_FOR_SEEK_OLD(EBsReadControlSegmentHeader)
+                WAIT_FOR_SEEK_OLD(EReadCtrl_diff_str_len)
                 break;
 
             default:
@@ -714,7 +699,7 @@ bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream *stream, bs_p
                 status = EBSAPI_ERR_INVALID_STATE;
                 break;
         }
-    } while ((!isPatchingDone(stream) && status == 0));
+    } while ((!isPatchingDone(stream) && status == EBSAPI_OPERATION_DONE_IMMEDIATELY));
 
     if (isPatchingDone(stream)) {
 #if PATCH_STAT_COUNTING
@@ -727,29 +712,30 @@ bs_patch_api_return_code_t ARM_BS_ProcessPatchEvent(bspatch_stream *stream, bs_p
     }
 }
 
-int readVarIntEventified(struct bspatch_stream *stream, int isSigned)
+bs_patch_api_return_code_t readVarIntEventified(struct bspatch_stream *stream, int isSigned)
 {
-    int status = 0;
+    bs_patch_api_return_code_t status = EBSAPI_OPERATION_DONE_IMMEDIATELY;
+    var_int_op_code decode_op;
     if (isSigned) {
-        status = decode_signed_varint(*(stream->nonCompressedDataBuffer), (int64_t *) &stream->var_int,
-                                      stream->var_int_len);
+        decode_op = decode_signed_varint(*(stream->nonCompressedDataBuffer), (int64_t *) &stream->var_int,
+                                         (int)stream->var_int_len);
     } else {
-        status = decode_unsigned_varint(*(stream->nonCompressedDataBuffer), &stream->var_int, stream->var_int_len);
+        decode_op = decode_unsigned_varint(*(stream->nonCompressedDataBuffer), &stream->var_int, (int)stream->var_int_len);
     }
     stream->var_int_len++;
 
-    if (stream->var_int_len >= 8 || status < 0) {
+    if (stream->var_int_len >= 8 || decode_op < 0) {
         status = EBSAPI_ERR_CORRUPTED_PATCH;
     }
 
-    if (status == OPERATION_NEEDS_MORE_DATA) {
-        status = 0;
+    if (decode_op == OPERATION_NEEDS_MORE_DATA) {
+        status = EBSAPI_OPERATION_DONE_IMMEDIATELY;
         SET_NEXT_STATE(EBspatch_read_varintPiece);
     } else {
         stream->var_int_len = 0;
         assert(stream->stateAfterReadVarInt);
         SET_NEXT_STATE(stream->stateAfterReadVarInt); // next state depends on state that started frame len reading
-        stream->stateAfterReadVarInt = 0;
+        stream->stateAfterReadVarInt = EBsInitial;
     }
     return status;
 }

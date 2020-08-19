@@ -64,6 +64,7 @@ extern "C" {
 #define UPDATE_CLASS_ID                         "pelion_wCfgParam_mbed.ClassId" // "FWClassId"
 #define UPDATE_FINGERPRINT                      "UPDATE_FINGERPRINT" // "FWFngrprnt"
 #define UPDATE_CERTIFICATE                      "pelion_wCrtae_mbed.UpdateAuthCert" // "FWUpdateCert"
+#define UPDATE_PUBKEY                           "pelion_wCrtae_mbed.UpdatePubKey"
 
 #define SSL_SESSION_DATA                        "SSL_SESSION_DATA" // "SslSessionDt"
 

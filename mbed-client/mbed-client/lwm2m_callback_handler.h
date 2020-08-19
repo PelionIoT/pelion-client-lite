@@ -25,7 +25,11 @@
 extern "C" {
 #endif
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 #include "lwm2m_registry.h"
+#else
+#include "lwm2m_endpoint.h"
+#endif
 
 #define CALLBACK_HANDLER_EVENT_INIT 0 ///< Callback handler init event
 #define CALLBACK_HANDLER_EVENT_ID 40 ///< Callback handler event ID
@@ -46,7 +50,11 @@ typedef struct callback_data_s {
  *
  * \param registry The registry that is associated with this callback handler.
  */
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 void callback_handler_init(registry_t *registry);
+#else
+void callback_handler_init(endpoint_t *endpoint);
+#endif
 
 /**
  * \brief Send callback handler event.

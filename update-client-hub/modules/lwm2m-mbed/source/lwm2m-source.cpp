@@ -38,7 +38,7 @@
 #ifndef MBED_CONF_MBED_CLIENT_ENABLE_CPP_API
 #include "firmware_update.h"
 #include "device_metadata.h"
-#include "lwm2m_get_req_handler.h"
+#include "lwm2m_req_handler.h"
 #endif
 
 #include <stdio.h>
@@ -428,14 +428,15 @@ arm_uc_error_t ARM_UCS_LWM2M_SOURCE_GetFirmwareFragment(arm_uc_uri_t *uri,
                                                     arm_uc_get_data_req_error_callback,
                                                     buffer);
 #else
-            get_handler_send_get_data_request(endpoint,
-                                              FIRMWARE_DOWNLOAD,
+            req_handler_send_data_request(endpoint,
+                                              FIRMWARE_DOWNLOAD, COAP_MSG_CODE_REQUEST_GET,
                                               (const char*) buffer->ptr,
                                               offset,
                                               true,
                                               arm_uc_get_data_req_callback,
                                               arm_uc_get_data_req_error_callback,
-                                              buffer);
+                                              buffer,
+                                              NULL, 0);
 #endif
 
             retval.code = ERR_NONE;

@@ -16,7 +16,7 @@
 
 #include <string.h>
 
-#include "lwm2m_get_req_handler.h"
+#include "lwm2m_req_handler.h"
 #include "lwm2m_endpoint.h"
 #include "sn_coap_protocol_internal.h"
 #include "lwm2m_heap.h"
@@ -37,6 +37,11 @@ typedef struct get_data_request_s {
     bool                async_req;
     bool                resend;
     DownloadType        download_type;
+#ifndef MBED_CLIENT_DISABLE_EST_FEATURE
+    sn_coap_msg_code_e  msg_code;
+    uint8_t             *payload;
+    uint16_t            payload_len;
+#endif
     ns_list_link_t      link;
 } get_data_request_t;
 
@@ -60,19 +65,22 @@ static uint8_t      generic_download_uri[]    = {'d', 'o', 'w', 'n', 'l', 'o', '
 static void timer_cb(void *param)
 {
     endpoint_t *endpoint = (endpoint_t*)param;
-    get_handler_send_message(endpoint);
-
+    req_handler_send_message(endpoint);
 }
-void get_handler_send_get_data_request(endpoint_t *endpoint,
+
+void req_handler_send_data_request(endpoint_t *endpoint,
                                        DownloadType type,
+                                       sn_coap_msg_code_e msg_code,
                                        const char *uri,
                                        const size_t offset,
                                        const bool async,
                                        get_data_cb data_cb,
                                        get_data_error_cb error_cb,
-                                       void *context)
+                                       void *context,
+                                       uint8_t *payload,
+                                       uint16_t payload_len)
 {
-    tr_debug("get_handler_send_get_data_request - uri: %s, offset: %lu", uri, (unsigned long)offset);
+    tr_debug("req_handler_send_data_request - uri: %s, offset: %lu", uri, (unsigned long)offset);
 
     get_data_request_t *data_request = NULL;
 
@@ -81,7 +89,6 @@ void get_handler_send_get_data_request(endpoint_t *endpoint,
     // Check the duplicate items
     ns_list_foreach(get_data_request_t, data, &get_request_list) {
         if ((strcmp(uri, data->uri_path) == 0) && (offset == data->received_size)) {
-            tr_debug("get_handler_send_get_data_request - item already exists");
             data_request = data;
             break;
         }
@@ -110,7 +117,11 @@ void get_handler_send_get_data_request(endpoint_t *endpoint,
         strcpy(data_request->uri_path, uri);
         data_request->on_get_data_cb = data_cb;
         data_request->on_get_data_error_cb = error_cb;
-
+#ifndef MBED_CLIENT_DISABLE_EST_FEATURE
+        data_request->msg_code = msg_code;
+        data_request->payload = payload;
+        data_request->payload_len = payload_len;
+#endif
         // Store to list so we can match the response
         ns_list_add_to_end(&get_request_list, data_request);
 
@@ -118,10 +129,9 @@ void get_handler_send_get_data_request(endpoint_t *endpoint,
     }
 
     send_queue_request(endpoint, SEND_QUEUE_REQUEST);
-
 }
 
-void get_handler_send_message(endpoint_t *endpoint)
+void req_handler_send_message(endpoint_t *endpoint)
 {
     sn_coap_hdr_s req_message;
     int endpoint_status;
@@ -144,30 +154,27 @@ void get_handler_send_message(endpoint_t *endpoint)
 
     // Fill CoAP message fields
     req_message.msg_type = COAP_MSG_TYPE_CONFIRMABLE;
+#ifndef MBED_CLIENT_DISABLE_EST_FEATURE
+    req_message.msg_code = data_request->msg_code;
+    req_message.payload_len = data_request->payload_len;
+    req_message.payload_ptr = data_request->payload;
+#else
     req_message.msg_code = COAP_MSG_CODE_REQUEST_GET;
-
-    if (data_request->download_type == FIRMWARE_DOWNLOAD) {
-        req_message.uri_path_len = FIRMWARE_DOWNLOAD_LEN;
-        req_message.uri_path_ptr = firmware_download_uri;
-    } else {
-        req_message.uri_path_len = GENERIC_DOWNLOAD_LEN;
-        req_message.uri_path_ptr = generic_download_uri;
-    }
-
+    req_message.payload_len = 0;
+    req_message.payload_ptr = NULL;
+#endif
     if (data_request->msg_token == 0) {
         data_request->msg_token = generate_token();
     }
     req_message.token_ptr = (uint8_t*)&data_request->msg_token;
     req_message.token_len = sizeof(data_request->msg_token);
-    req_message.payload_len = 0;
-    req_message.payload_ptr = NULL;
     req_message.content_format = COAP_CT_NONE;
     req_message.msg_id = 0;
     req_message.coap_status = COAP_STATUS_OK;
     req_message.options_list_ptr = NULL;
 
     if (sn_coap_parser_alloc_options(endpoint->coap, &req_message) == NULL) {
-        tr_error("get_handler_send_message - sn_coap_parser_alloc_options Allocation failed, return retry later");
+        tr_error("req_handler_send_message - sn_coap_parser_alloc_options Allocation failed, return retry later");
         endpoint->coap->sn_coap_protocol_free(req_message.options_list_ptr);
         send_queue_sent(endpoint, true);
         return;
@@ -181,10 +188,41 @@ void get_handler_send_message(endpoint_t *endpoint)
     // Add block size
     req_message.options_list_ptr->block2 |= sn_coap_convert_block_size(endpoint->coap->sn_coap_block_data_size);
 
+#ifndef MBED_CLIENT_DISABLE_EST_FEATURE
+    if (data_request->msg_code == COAP_MSG_CODE_REQUEST_GET) {
+        // In GET we use hardcoded uri path('fw' or 'download') since the actual binary path will be part of
+        // proxy uri option
+        if (data_request->download_type == FIRMWARE_DOWNLOAD) {
+            req_message.uri_path_len = FIRMWARE_DOWNLOAD_LEN;
+            req_message.uri_path_ptr = firmware_download_uri;
+        } else {
+            req_message.uri_path_len = GENERIC_DOWNLOAD_LEN;
+            req_message.uri_path_ptr = generic_download_uri;
+        }
+
+        // Add download path
+        req_message.options_list_ptr->proxy_uri_len = (uint16_t)strlen(data_request->uri_path);
+        req_message.options_list_ptr->proxy_uri_ptr = (uint8_t*)data_request->uri_path;
+    } else {
+        // POST or PUT request, URI path goes directly to CoAP header.
+        req_message.uri_path_len = strlen(data_request->uri_path);
+        req_message.uri_path_ptr = (uint8_t *) data_request->uri_path;
+    }
+#else // MBED_CLIENT_DISABLE_EST_FEATURE
+    // In GET we use hardcoded uri path('fw' or 'download') since the actual binary path will be part of
+    // proxy uri option
+    if (data_request->download_type == FIRMWARE_DOWNLOAD) {
+        req_message.uri_path_len = FIRMWARE_DOWNLOAD_LEN;
+        req_message.uri_path_ptr = firmware_download_uri;
+    } else {
+        req_message.uri_path_len = GENERIC_DOWNLOAD_LEN;
+        req_message.uri_path_ptr = generic_download_uri;
+    }
+
     // Add download path
     req_message.options_list_ptr->proxy_uri_len = (uint16_t)strlen(data_request->uri_path);
     req_message.options_list_ptr->proxy_uri_ptr = (uint8_t*)data_request->uri_path;
-
+#endif // MBED_CLIENT_DISABLE_EST_FEATURE
     endpoint_status = endpoint_send_coap_message(endpoint, NULL, &req_message);
 
     endpoint->coap->sn_coap_protocol_free(req_message.options_list_ptr);
@@ -198,7 +236,6 @@ void get_handler_send_message(endpoint_t *endpoint)
         lwm2m_free(data_request);
         send_queue_sent(endpoint, true);
     }
-
 }
 
 static void get_handler_init(endpoint_t *endpoint)
@@ -213,13 +250,13 @@ static void get_handler_init(endpoint_t *endpoint)
     }
 }
 
-void get_handler_destroy(void)
+void req_handler_destroy(void)
 {
-    get_handler_free_get_request_list(NULL, false, FAILED_TO_SEND_MSG);
+    req_handler_free_request_list(NULL, false, FAILED_TO_SEND_MSG);
     initialized = false;
 }
 
-bool get_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap_header)
+bool req_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap_header)
 {
 
     get_data_request_t *get_data_req;
@@ -229,7 +266,7 @@ bool get_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap
         return false;
     }
 
-    tr_debug("get_handler_handle_response - msg code %d", coap_header->msg_code);
+    tr_debug("req_handler_handle_response - msg code %d", coap_header->msg_code);
 
     send_queue_sent(endpoint, true);
 
@@ -252,7 +289,7 @@ bool get_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap
     if (coap_header->msg_code == COAP_MSG_CODE_RESPONSE_CONTENT &&
         coap_header->coap_status != COAP_STATUS_BUILDER_MESSAGE_SENDING_FAILED) {
 
-        get_handler_free_get_request_list(coap_header, false, FAILED_TO_SEND_MSG);
+        req_handler_free_request_list(coap_header, false, FAILED_TO_SEND_MSG);
 
         get_data_req->received_size += coap_header->payload_len;
         get_data_req->on_get_data_cb(coap_header->payload_ptr,
@@ -264,14 +301,31 @@ bool get_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap
         // In sync mode, call next GET automatically until all blocks have been received
         if (get_data_req->async_req == false) {
             if (coap_header->options_list_ptr && (coap_header->options_list_ptr->block2 & 0x08)) {
-                get_handler_send_get_data_request(endpoint,
-                                                  get_data_req->download_type,
-                                                  get_data_req->uri_path,
-                                                  get_data_req->received_size,
-                                                  get_data_req->async_req,
-                                                  get_data_req->on_get_data_cb,
-                                                  get_data_req->on_get_data_error_cb,
-                                                  get_data_req->context);
+#ifndef MBED_CLIENT_DISABLE_EST_FEATURE
+                req_handler_send_data_request(endpoint,
+                                                get_data_req->download_type,
+                                                get_data_req->msg_code,
+                                                get_data_req->uri_path,
+                                                get_data_req->received_size,
+                                                get_data_req->async_req,
+                                                get_data_req->on_get_data_cb,
+                                                get_data_req->on_get_data_error_cb,
+                                                get_data_req->context,
+                                                get_data_req->payload,
+                                                get_data_req->payload_len);
+#else
+                req_handler_send_data_request(endpoint,
+                                                get_data_req->download_type,
+                                                COAP_MSG_CODE_REQUEST_GET,
+                                                get_data_req->uri_path,
+                                                get_data_req->received_size,
+                                                get_data_req->async_req,
+                                                get_data_req->on_get_data_cb,
+                                                get_data_req->on_get_data_error_cb,
+                                                get_data_req->context,
+                                                NULL,
+                                                0);
+#endif
             }
         }
     } else {
@@ -283,7 +337,7 @@ bool get_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap
             return true;
 
         } else if (coap_header->msg_code == COAP_MSG_CODE_RESPONSE_SERVICE_UNAVAILABLE) {
-            tr_debug("get_handler_handle_response - msg code COAP_MSG_CODE_RESPONSE_SERVICE_UNAVAILABLE");
+            tr_debug("req_handler_handle_response - msg code COAP_MSG_CODE_RESPONSE_SERVICE_UNAVAILABLE");
             bool retry = true;
 
             if (!download_retry_time) {
@@ -293,26 +347,26 @@ bool get_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap
                 download_retry_time *= 2;
 
                 if (download_retry_time > MAX_RECONNECT_TIMEOUT) {
-                    tr_error("get_handler_handle_response - file download failed, retry completed");
-                    get_handler_free_get_request_list(coap_header, true, FAILED_TO_SEND_MSG);
+                    tr_error("req_handler_handle_response - file download failed, retry completed");
+                    req_handler_free_request_list(coap_header, true, FAILED_TO_SEND_MSG);
                     retry = false;
                 }
             }
 
             if (retry) {
                 if (eventOS_timeout_ms(timer_cb, download_retry_time * 1000, (void*)endpoint) == NULL) {
-                    tr_error("get_handler_handle_response - failed to create a timer");
-                    get_handler_free_get_request_list(coap_header, true, FAILED_TO_SEND_MSG);
+                    tr_error("req_handler_handle_response - failed to create a timer");
+                    req_handler_free_request_list(coap_header, true, FAILED_TO_SEND_MSG);
                 } else {
                     get_data_req->resend = true;
-                    tr_debug("get_handler_handle_response - continue file download after % "PRId32" (s)", download_retry_time);
+                    tr_debug("req_handler_handle_response - continue file download after % "PRId32" (s)", download_retry_time);
                 }
             }
 
             return true;
 
         } else {
-            get_handler_free_get_request_list(coap_header, true, FAILED_TO_SEND_MSG);
+            req_handler_free_request_list(coap_header, true, FAILED_TO_SEND_MSG);
         }
 
     }
@@ -327,7 +381,7 @@ bool get_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap
 
 }
 
-void get_handler_free_get_request_list(const sn_coap_hdr_s *coap_header, bool call_error_cb, get_data_req_error_t error_code)
+void req_handler_free_request_list(const sn_coap_hdr_s *coap_header, bool call_error_cb, get_data_req_error_t error_code)
 {
     if (initialized) {
         // Clean up whole list
@@ -350,7 +404,7 @@ void get_handler_free_get_request_list(const sn_coap_hdr_s *coap_header, bool ca
                     }
 
                     ns_list_remove(&get_request_list, data);
-                    // Object itself is freed in get_handler_handle_response() after callback has been completed
+                    // Object itself is freed in req_handler_handle_response() after callback has been completed
                     return;
                 }
             }
@@ -369,7 +423,7 @@ static bool get_handler_is_response_to_get_req(const sn_coap_hdr_s *coap_header,
     return false;
 }
 
-void get_handler_set_resend_status(void)
+void req_handler_set_resend_status(void)
 {
     if (!initialized) {
         return;
@@ -380,7 +434,7 @@ void get_handler_set_resend_status(void)
     }
 }
 
-void get_handler_send_pending_request(endpoint_t *endpoint)
+void req_handler_send_pending_request(endpoint_t *endpoint)
 {
     if (!initialized) {
         return;

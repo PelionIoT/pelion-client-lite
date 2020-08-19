@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2019 ARM Ltd.
+// Copyright 2018-2020 ARM Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -26,13 +26,56 @@
 extern "C" {
 #endif
 
+/**
+ * Return a pointer to application start.
+ *
+ * \return Pointer to application start.
+ */
 uint8_t *fota_curr_fw_get_app_start_addr(void);
 
+/**
+ * Return a pointer to header start.
+ *
+ * \return Pointer to header start.
+ */
 uint8_t *fota_curr_fw_get_app_header_addr(void);
 
+#if defined(FOTA_CUSTOM_CURR_FW_STRUCTURE) && (FOTA_CUSTOM_CURR_FW_STRUCTURE)
+/**
+ * Read header of current firmware.
+ *
+ * \param[in] header_info Header info structure.
+ * \return FOTA_STATUS_SUCCESS on success.
+ */
 int fota_curr_fw_read_header(fota_header_info_t *header_info);
+#else
 
+// Default read header implementation
+static inline int fota_curr_fw_read_header(fota_header_info_t *header_info)
+{
+    uint8_t *header_in_curr_fw = (uint8_t *)fota_curr_fw_get_app_header_addr();
+    return fota_deserialize_header(header_in_curr_fw, fota_get_header_size(), header_info);
+}
+#endif
+
+/**
+ * Read from current firmware.
+ *
+ * \param[out] buf       Buffer to read into.
+ * \param[in]  offset    Offset in firmware.
+ * \param[in]  size      Size to read (bytes).
+ * \param[out] num_read  Number of read bytes.
+ * \return FOTA_STATUS_SUCCESS on success.
+ */
 int fota_curr_fw_read(uint8_t *buf, uint32_t offset, uint32_t size, uint32_t *num_read);
+
+/**
+ * Read digest from current firmware.
+ *
+ * \param[out]  buf     Buffer to read into.
+ * \return FOTA_STATUS_SUCCESS on success.
+ */
+int fota_curr_fw_get_digest(uint8_t *buf);
 
 #ifdef __cplusplus
 }
