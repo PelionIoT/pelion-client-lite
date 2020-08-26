@@ -1,6 +1,10 @@
 ## Changelog for Pelion Device Management Client Lite
 
-### Release 1.2.0-lite (19.08.2020)
+### Release 1.2.1-lite (26.08.2020)
+
+Fixed handling of partially written (due to power-cut) flash pages while installing the FW candidate.
+
+### Release 1.2.0-lite (17.08.2020)
 
 * Fixed an issue where Client Lite would trigger sleep-callback during the bootstrapping process.
 * Changed the notification handler to send a notification only when crossing the "less than" or "greater than" notification threshold values.
