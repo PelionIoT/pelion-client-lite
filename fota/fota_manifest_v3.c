@@ -39,9 +39,69 @@
 #include "fota/fota_nvm.h"
 #include "fota/fota_crypto.h"
 #include "mbedtls/asn1.h"
-#include "mbedtls/sha256.h"
+#include "mbedtls/asn1write.h"
 #include "mbedtls/x509_crt.h"
-#include "mbedtls/pk.h"
+
+#define FOTA_IMAGE_DER_SIGNATURE_SIZE 72  // DER encoded signature max size
+
+#if defined(FOTA_USE_UPDATE_X509)
+static inline int der_encode_signature_helper(
+    const mbedtls_mpi *r, const mbedtls_mpi *s,
+    uint8_t *buffer, size_t buffer_size, size_t *bytes_written)
+{
+    FOTA_DBG_ASSERT(buffer_size == FOTA_IMAGE_DER_SIGNATURE_SIZE);
+    int ret;
+    unsigned char *p = buffer + buffer_size;  // pointer to the end of buffer
+    int len = 0;
+    // tags are written in the reverse order
+
+    MBEDTLS_ASN1_CHK_ADD(len, mbedtls_asn1_write_mpi(&p, buffer, s));
+    MBEDTLS_ASN1_CHK_ADD(len, mbedtls_asn1_write_mpi(&p, buffer, r));
+
+    MBEDTLS_ASN1_CHK_ADD(len, mbedtls_asn1_write_len(&p, buffer, (size_t)len));
+    MBEDTLS_ASN1_CHK_ADD(len, mbedtls_asn1_write_tag(&p, buffer, MBEDTLS_ASN1_CONSTRUCTED | MBEDTLS_ASN1_SEQUENCE));
+
+    memmove(buffer, p, len);
+    *bytes_written = (size_t)len;
+
+    return FOTA_STATUS_SUCCESS;
+}
+
+static inline int fota_der_encode_signature(
+    const uint8_t *raw_signature, size_t  raw_signature_size,
+    uint8_t *buffer, size_t buffer_size, size_t *bytes_written)
+{
+    int ret;
+    mbedtls_mpi r, s;
+    mbedtls_mpi_init(&r);
+    mbedtls_mpi_init(&s);
+
+    FOTA_DBG_ASSERT(raw_signature_size == FOTA_IMAGE_RAW_SIGNATURE_SIZE);
+
+    const size_t curve_bytes = FOTA_IMAGE_RAW_SIGNATURE_SIZE / 2;
+
+    // Read r component
+    ret = mbedtls_mpi_read_binary(&r, raw_signature, curve_bytes);
+    if (ret) {
+        ret = FOTA_STATUS_INTERNAL_CRYPTO_ERROR;
+        goto cleanup;
+    }
+    // Read s component
+    ret = mbedtls_mpi_read_binary(&s, raw_signature + curve_bytes, curve_bytes);
+    if (ret) {
+        ret = FOTA_STATUS_INTERNAL_CRYPTO_ERROR;
+        goto cleanup;
+    }
+
+    ret = der_encode_signature_helper(&r, &s, buffer, buffer_size, bytes_written);
+
+cleanup:
+    mbedtls_mpi_free(&r);
+    mbedtls_mpi_free(&s);
+
+    return ret;
+}
+#endif // FOTA_USE_UPDATE_X509
 
 /*
  * DeltaMetadata ::= SEQUENCE {
@@ -50,8 +110,8 @@
  *   precursor-digest OCTET STRING
  * }
  */
-
-int parse_delta_metadata(
+#if !defined(FOTA_DISABLE_DELTA)
+static int parse_delta_metadata(
     const uint8_t *metadata, size_t metadata_size,
     manifest_firmware_info_t *fw_info, const uint8_t *input_data
 )
@@ -103,6 +163,7 @@ int parse_delta_metadata(
     return FOTA_STATUS_SUCCESS;
 
 }
+#endif // !FOTA_DISABLE_DELTA
 
 
 /*
@@ -131,7 +192,9 @@ int parse_manifest_internal(
     int fota_status = FOTA_STATUS_INTERNAL_ERROR;
     const unsigned char *manifest_end = manifest + manifest_size;
     unsigned char *p = (unsigned char *) manifest;
+#if !defined(FOTA_DISABLE_DELTA)
     bool is_delta = false;
+#endif
     size_t len;
 
     FOTA_MANIFEST_TRACE_DEBUG("Parse Manifest:vendor-id @%d",  p - input_data);
@@ -200,7 +263,7 @@ int parse_manifest_internal(
 
     if (len >= FOTA_COMPONENT_MAX_NAME_SIZE) {
         FOTA_TRACE_ERROR("component-name too long %zu", len);
-        return FOTA_STATUS_MANIFEST_SEMVER_ERROR;
+        return FOTA_STATUS_MANIFEST_MALFORMED;
     }
     memcpy(fw_info->component_name, p, len);
     FOTA_MANIFEST_TRACE_DEBUG("component-name %s", fw_info->component_name);
@@ -215,7 +278,7 @@ int parse_manifest_internal(
     }
     if (len >= FOTA_COMPONENT_MAX_SEMVER_STR_SIZE) {
         FOTA_TRACE_ERROR("Manifest:payload-version too long %zu", len);
-        return FOTA_STATUS_MANIFEST_PAYLOAD_CORRUPTED;
+        return FOTA_STATUS_MANIFEST_MALFORMED;
     }
     char sem_ver[FOTA_COMPONENT_MAX_SEMVER_STR_SIZE] = { 0 };
     memcpy(sem_ver, p, len);
@@ -246,7 +309,7 @@ int parse_manifest_internal(
     tls_status = mbedtls_asn1_get_int(&p, manifest_end, (int *) &fw_info->payload_size);
     if (tls_status != 0) {
         FOTA_TRACE_ERROR("Error reading Manifest:payload-size %d", tls_status);
-        return FOTA_STATUS_MANIFEST_PAYLOAD_CORRUPTED;
+        return FOTA_STATUS_MANIFEST_MALFORMED;
     }
     FOTA_MANIFEST_TRACE_DEBUG("Manifest:payload-size %" PRIu32, fw_info->payload_size);
 
@@ -276,9 +339,12 @@ int parse_manifest_internal(
 
     FOTA_MANIFEST_TRACE_DEBUG("Manifest:payload-format %d", payload_format_value);
     fw_info->payload_format = payload_format_value;
+#if !defined(FOTA_DISABLE_DELTA)
     if (payload_format_value == FOTA_MANIFEST_PAYLOAD_FORMAT_DELTA) {
         is_delta = true;
-    } else if (payload_format_value != FOTA_MANIFEST_PAYLOAD_FORMAT_RAW) {
+    } else
+#endif
+    if (payload_format_value != FOTA_MANIFEST_PAYLOAD_FORMAT_RAW) {
         FOTA_TRACE_ERROR("error unsupported payload format %d - ", payload_format_value);
         return FOTA_STATUS_MANIFEST_PAYLOAD_UNSUPPORTED;
     }
@@ -300,6 +366,7 @@ int parse_manifest_internal(
         FOTA_MANIFEST_TRACE_DEBUG("installed-signature not found ptr=%p", p);
     }
 
+#if !defined(FOTA_DISABLE_DELTA)
     if (is_delta) {
         FOTA_MANIFEST_TRACE_DEBUG("Parse Manifest:delta-metadata @%d",  p - input_data);
         tls_status = mbedtls_asn1_get_tag(
@@ -319,7 +386,9 @@ int parse_manifest_internal(
 
         p += len;
 
-    } else {
+    } else
+#endif
+    {
         /*for the ease of use we will fill in payload size and digest values */
         memcpy(fw_info->installed_digest, fw_info->payload_digest, FOTA_CRYPTO_HASH_SIZE);
         fw_info->installed_size = fw_info->payload_size;
@@ -332,7 +401,7 @@ int parse_manifest_internal(
     if (tls_status == 0) {
         if (FOTA_MANIFEST_VENDOR_DATA_SIZE < len) {
             FOTA_TRACE_ERROR("Manifest:vendor-data too long %zu", len);
-            return FOTA_STATUS_MANIFEST_WRONG_VENDOR_ID;
+            return FOTA_STATUS_MANIFEST_CUSTOM_DATA_TOO_BIG;
         }
         memcpy(fw_info->vendor_data, p, len);
 
@@ -435,12 +504,30 @@ int fota_manifest_parse(
         FOTA_TRACE_ERROR("Error reading SignedResource:signature %d", tmp_status);
         return FOTA_STATUS_MANIFEST_MALFORMED;
     }
-
 #if !defined(FOTA_TEST_MANIFEST_BYPASS_VALIDATION)
+
+#if defined(FOTA_USE_UPDATE_X509)
+    // signature in manifest schema v3 is a raw signature,
+    // When using mbedtls_pk is used DER encoded signature is expected
+    uint8_t der_encoded_sig[FOTA_IMAGE_DER_SIGNATURE_SIZE];
+    size_t der_encoded_sig_size;
+
+    tmp_status = fota_der_encode_signature(
+                     p, len,
+                     der_encoded_sig, sizeof(der_encoded_sig), &der_encoded_sig_size);
+    if (tmp_status != 0) {
+        FOTA_TRACE_ERROR("Error fota_der_encode_signature failed %d", tmp_status);
+        return FOTA_STATUS_MANIFEST_MALFORMED;
+    }
+    fota_sig_status = fota_verify_signature(
+                          signed_data_ptr, signed_data_size,
+                          der_encoded_sig, der_encoded_sig_size);
+#else  // defined(FOTA_USE_UPDATE_X509)
 
     fota_sig_status = fota_verify_signature(
                           signed_data_ptr, signed_data_size,
                           p, len);
+#endif  // defined(FOTA_USE_UPDATE_X509)
     FOTA_FI_SAFE_COND(
         fota_sig_status == FOTA_STATUS_SUCCESS,
         fota_sig_status,

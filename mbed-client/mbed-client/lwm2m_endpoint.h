@@ -32,22 +32,26 @@
 extern "C" {
 #endif
 
-#define ENDPOINT_EVENT_ID 39 ///< ID for all endpoint events.
-#define ENDPOINT_EVENT_BOOTSTRAP_SENT 30 ///< Bootstrap message acknowledged.
-#define ENDPOINT_EVENT_BOOTSTRAP_READY 31 ///< Bootstrap done.
-#define ENDPOINT_EVENT_REGISTERED 32 ///< Registration done.
-#define ENDPOINT_EVENT_DEREGISTERED 33 ///< Deregistration done.
-#define ENDPOINT_EVENT_REREGISTERED 34 ///< Update registration done.
-#define ENDPOINT_EVENT_ERROR_BOOTSTRAP 36 ///< Bootstrap failed.
-#define ENDPOINT_EVENT_ERROR_REGISTER 37 ///< Registration failed.
+#define ENDPOINT_EVENT_ID               39 ///< ID for all endpoint events.
+#define ENDPOINT_EVENT_BOOTSTRAP_SENT   30 ///< Bootstrap message acknowledged.
+#define ENDPOINT_EVENT_BOOTSTRAP_READY  31 ///< Bootstrap done.
+#define ENDPOINT_EVENT_REGISTERED       32 ///< Registration done.
+#define ENDPOINT_EVENT_DEREGISTERED     33 ///< Deregistration done.
+#define ENDPOINT_EVENT_REREGISTERED     34 ///< Update registration done.
+#define ENDPOINT_EVENT_ERROR_BOOTSTRAP  36 ///< Bootstrap failed.
+#define ENDPOINT_EVENT_ERROR_REGISTER   37 ///< Registration failed.
 #define ENDPOINT_EVENT_ERROR_DEREGISTER 38 ///< Deregistration failed.
 #define ENDPOINT_EVENT_ERROR_REREGISTER 39 ///< Update registration failed.
-#define ENDPOINT_EVENT_ERROR_TIMEOUT 40 ///< Generic message sending timeout.
+#define ENDPOINT_EVENT_ERROR_TIMEOUT    40 ///< Generic message sending timeout.
 
-#define ENDPOINT_EVENT_STATUS_OK 0 ///< No errors.
-#define ENDPOINT_EVENT_STATUS_NO_MEMORY 1 ///< Memory allocation failed.
-#define ENDPOINT_EVENT_STATUS_TIMEOUT 2 ///< Message sending timeout.
-#define ENDPOINT_EVENT_STATUS_CONNECTION_ERROR 3 ///< Generic connection error.
+#define ENDPOINT_EVENT_STATUS_OK                   0 ///< No errors.
+#define ENDPOINT_EVENT_STATUS_NO_MEMORY            1 ///< Memory allocation failed.
+#define ENDPOINT_EVENT_STATUS_TIMEOUT              2 ///< Message sending timeout.
+#define ENDPOINT_EVENT_STATUS_CONNECTION_ERROR     3 ///< Generic connection error.
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
+#define ENDPOINT_EVENT_STATUS_RESPONSE_FORBIDDEN   4 ///< Forbidden response to register message
+#define ENDPOINT_EVENT_STATUS_RESPONSE_BAD_REQUEST 5 ///< bad request response to register message
+#endif //MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 
 #define ENDPOINT_MSG_UNDEFINED   0 ///< No message.
 #define ENDPOINT_MSG_REGISTER    1 ///< Registration message.
@@ -89,8 +93,10 @@ typedef struct endpoint_confirmable_response_s {
     sn_coap_msg_code_e msg_code; ///< Response code.
     uint16_t msg_id; ///< Message ID for the response.
     registry_path_t path; ///< Path to the resource this response is associated with.
-    bool notify_result:1; ///< True if the resource expects to be notified when response is received.
-    bool pending:1; ///< True if a response is pending to be sent.
+
+    // These were packed into bitfield, but it caused ROM increase by 64B while saving 1 byte of RAM.
+    bool notify_result; ///< True if the resource expects to be notified when response is received.
+    bool pending; ///< True if a response is pending to be sent.
 
 } endpoint_confirmable_response_t;
 
@@ -103,12 +109,26 @@ typedef struct object_handler_s object_handler_t;
  */
 typedef struct endpoint_s {
 
-    send_queue_t send_queue; ///< Data allocated for send queue.
+    // even though this is a bit large, this is good to keep here, as it is used a lot
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     registry_t registry; ///< Data allocated for registry.
-    notifier_t notifier; ///< Data allocated for notifier.
 #endif
-    endpoint_confirmable_response_t confirmable_response; ///< Data allocated for storing a response.
+    int8_t event_handler_id; ///< ID of the event handler for the endpoint events.
+
+    // These next small variables were tightly packed into bitfield, which saved ~3 bytes of RAM. But
+    // it came with expense of 128 bytes of ROM in Cotrex M0. So this version trades off the RAM to ROM.
+
+    uint8_t message_type; ///< Type of the currently processed message.
+    uint8_t last_message_type; ///< Type of the last endpoint message sent.
+    oma_lwm2m_binding_and_mode_t mode; ///< Binding mode.
+    bool free_parameters; ///< If != 0, `name`, `type` and `domain` will be passed to `lwm2m_free` when `endpoint_destroy` is called.
+    bool registered; ///< Flag used for checking if the endpoint is currently registered to the server.
+#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
+    bool coap_ping_request; ///< CoAP ping request is pending.
+#endif
+
+    send_queue_t send_queue; ///< Data allocated for send queue.
+
     struct connection_s *connection; ///< Pointer to connection.
     struct coap_s *coap; ///< Pointer to the CoAP library.
     const char *type; ///< Endpoint type, a null-terminated string or NULL.
@@ -122,15 +142,7 @@ typedef struct endpoint_s {
     uint32_t next_coap_ping_send_time; ///< In seconds, new time is calculated after packet sending.
     uint16_t coap_ping_id; ///< Message ID of the last CoAP ping.
 #endif
-    int8_t event_handler_id; ///< ID of the event handler for the endpoint events.
-    unsigned message_type:3; ///< Type of the currently processed message.
-    unsigned last_message_type:3; ///< Type of the last endpoint message sent.
-    oma_lwm2m_binding_and_mode_t mode:4; ///< Binding mode.
-    bool free_parameters:1; ///< If != 0, `name`, `type` and `domain` will be passed to `lwm2m_free` when `endpoint_destroy` is called.
-    bool registered:1; ///< Flag used for checking if the endpoint is currently registered to the server.
-#if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
-    bool coap_ping_request:1; ///< CoAP ping request is pending.
-#endif
+
 
 #ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     object_handler_t *object_handlers; //Object owners
@@ -141,6 +153,10 @@ typedef struct endpoint_s {
     uint8_t security_mode;
     char *server_uri;
 #endif
+
+    notifier_t notifier; ///< Data allocated for notifier.
+
+    endpoint_confirmable_response_t confirmable_response; ///< Data allocated for storing a response.
 
 } endpoint_t;
 
@@ -267,6 +283,7 @@ void endpoint_send_message(endpoint_t *endpoint);
  */
 int endpoint_register(endpoint_t *endpoint);
 
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 /**
  * \brief Start the bootstrap process for the endpoint.
  *
@@ -280,6 +297,7 @@ int endpoint_register(endpoint_t *endpoint);
  * \return ENDPOINT_STATUS_ERROR Other endpoint operation already ongoing.
  */
 int endpoint_bootstrap(endpoint_t *endpoint);
+#endif
 
 /**
  * \brief Start the update registration process for the endpoint.
@@ -438,7 +456,17 @@ void endpoint_send_coap_ping(endpoint_t *endpoint);
  */
 void endpoint_register_object_handler(endpoint_t *endpoint, object_handler_t *handler);
 
-void endpoint_remove_object_handler(endpoint_t *endpoint, uint16_t object_id);
+/**
+ * @brief Deallocate registered object handlers
+ *
+ *  Deallocate object handlers allocated with `endpoint_allocate_object_handler` and
+ *  registered with `endpoint_register_object_handler`.
+ *
+ * \note Called automatically on PDMC deinit.
+ *
+ * @param endpoint Pointer to the endpoint.
+ */
+void endpoint_deallocate_object_handlers(endpoint_t *endpoint);
 
 /**
  * @brief Allocate object handler
@@ -469,6 +497,8 @@ register_resource_t *endpoint_create_register_resource(endpoint_t *endpoint, con
 coap_req_cb *endpoint_get_coap_request_callback(endpoint_t *endpoint, uint16_t object_id);
 
 registry_callback_t endpoint_get_object_callback(endpoint_t *endpoint, uint16_t object_id);
+
+int endpoint_send_notification_int(endpoint_t *endpoint, uint16_t object_id, uint16_t aobs_id, int64_t value);
 
 #endif
 

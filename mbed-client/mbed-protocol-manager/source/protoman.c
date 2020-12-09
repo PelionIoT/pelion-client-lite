@@ -305,14 +305,27 @@ static int _protoman_drive_layers_to_state(struct protoman_s *protoman, int targ
 
     /* Loop layers from top down */
     ns_list_foreach(struct protoman_layer_s, layer, &protoman->layers) {
+        protoman_verbose("driving layer %s", layer->name);
         /* Skip layers without state */
         if (layer->no_statemachine) {
             continue;
         }
 
-        /* Already in target state, continue to next */
+        /* Layer is already in target state, continue to next layer*/
         if (target_state == layer->perceived_state) {
-            continue;
+            if (target_state == layer->current_state) {
+                /* If layer is not in the middle of a transition*/
+                continue;
+            }
+#ifdef PROTOMAN_VERBOSE
+            else {
+                /* If layer is in the middle of transition it still needs to be driven to new target state. */
+                protoman_verbose("layer %s in mid-transition");
+                protoman_verbose("current state %s != perceived state %s",
+                    protoman_strstate(layer->current_state),
+                    protoman_strstate(layer->perceived_state));
+            }
+#endif
         }
 
         /* Start state transition */
@@ -342,10 +355,15 @@ static int _do_connect(struct protoman_s *protoman)
 
     protoman_verbose("");
 
+    // There must be at least one layer to begin with or client side logic is royally
+    // mixed up and the Protoman code is ran without completing the initialization
+    // sequence.
+    assert(last_layer);
+
     /* Trigger last layer to start connecting */
     /* TODO this will break if last layer does not have statemachine
      *  solution: find first layer with statemachine and call that */
-    if (PROTOMAN_STATE_CONNECTED != last_layer->target_state) {
+    if ((last_layer) && (PROTOMAN_STATE_CONNECTED != last_layer->target_state)) {
         last_layer->target_state = PROTOMAN_STATE_CONNECTED;
         protoman_event(protoman, last_layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
     }
@@ -374,9 +392,14 @@ void protoman_run(struct protoman_s *protoman)
 {
     struct protoman_layer_s *last_layer = ns_list_get_last(&protoman->layers);
 
+#ifdef PROTOMAN_VERBOSE
     protoman_verbose("%s (>> %s)",
              protoman_strstate(protoman->current_state),
              protoman_strstate(protoman->target_state));
+    if (protoman->current_state == protoman->target_state - 1) {
+        protoman_verbose("Current state doesn't match target state");
+    }
+#endif
 
     switch (protoman->current_state) {
         case PROTOMAN_STATE_INITIALIZING:
@@ -389,10 +412,17 @@ void protoman_run(struct protoman_s *protoman)
             break;
 
         case PROTOMAN_STATE_CONNECTING:
-            switch (_do_connect(protoman)) {
-                case PROTOMAN_STATE_RETVAL_FINISHED:
-                    _protoman_state_change(protoman, PROTOMAN_STATE_CONNECTED);
-                    break;
+            if (protoman->target_state == PROTOMAN_STATE_PAUSED) {
+                /* Disconnecting when pausing while connecting was not finished */
+                protoman_debug("force disconnecting on pausing while connecting");
+                protoman->target_state = PROTOMAN_STATE_DISCONNECTED;
+                _protoman_state_change(protoman, PROTOMAN_STATE_DISCONNECTING);
+            } else {
+                switch (_do_connect(protoman)) {
+                    case PROTOMAN_STATE_RETVAL_FINISHED:
+                        _protoman_state_change(protoman, PROTOMAN_STATE_CONNECTED);
+                        break;
+                }
             }
             break;
 
@@ -435,19 +465,44 @@ void protoman_run(struct protoman_s *protoman)
                     break;
 
                 case PROTOMAN_STATE_RESUMED:
-                    /* Don't start (re)connecting until all layers are disconnected or initialized */
-                    if (!(_layers_in_state(protoman, PROTOMAN_STATE_DISCONNECTED) ||
-                            _layers_in_state(protoman, PROTOMAN_STATE_INITIALIZED) ||
-                            _layers_in_state(protoman, PROTOMAN_STATE_PAUSED))) {
-                        break;
+                    if (protoman->current_state == PROTOMAN_STATE_DISCONNECTED || protoman->current_state == PROTOMAN_STATE_INITIALIZED) {
+                        /* Connecting when resuming from initialized or disconnected state  */
+                        protoman_debug("force connecting on resuming from %s", protoman_strstate(protoman->current_state));
+                        protoman->target_state = PROTOMAN_STATE_CONNECTED;
+                        _protoman_state_change(protoman, PROTOMAN_STATE_CONNECTING);
+                    } else {
+                        /* Don't start (re)connecting until all layers are disconnected or initialized */
+                        if (!(_layers_in_state(protoman, PROTOMAN_STATE_DISCONNECTED) ||
+                                _layers_in_state(protoman, PROTOMAN_STATE_INITIALIZED) ||
+                                _layers_in_state(protoman, PROTOMAN_STATE_PAUSED))) {
+                            break;
+                        }
+                        _protoman_state_change(protoman, PROTOMAN_STATE_RESUMING);
                     }
-                    _protoman_state_change(protoman, PROTOMAN_STATE_RESUMING);
+                    break;
+
+                case PROTOMAN_STATE_DISCONNECTED:
+                    if (protoman->current_state == PROTOMAN_STATE_INITIALIZED) {
+                        _protoman_state_change(protoman, PROTOMAN_STATE_DISCONNECTING);
+                    }
+                    break;
+
+                case PROTOMAN_STATE_PAUSED:
+                    if (protoman->current_state == PROTOMAN_STATE_INITIALIZED) {
+                        _protoman_state_change(protoman, PROTOMAN_STATE_PAUSING);
+                    }
                     break;
             }
             break;
 
         case PROTOMAN_STATE_ERRORING:
-            _protoman_state_change(protoman, PROTOMAN_STATE_ERRORED);
+            switch (protoman->target_state) {
+                case PROTOMAN_STATE_PAUSED:
+                    _protoman_state_change(protoman, PROTOMAN_STATE_PAUSING);
+                    break;
+                default:
+                    _protoman_state_change(protoman, PROTOMAN_STATE_ERRORED);
+            }
             break;
 
         case PROTOMAN_STATE_ERRORED:
@@ -462,11 +517,16 @@ void protoman_run(struct protoman_s *protoman)
             break;
 
         case PROTOMAN_STATE_RESUMING:
-            switch (_do_resume(protoman)) {
-                case PROTOMAN_STATE_RETVAL_FINISHED:
-                    // XXX: or should we actually skip to CONNECTED
-                    _protoman_state_change(protoman, PROTOMAN_STATE_RESUMED);
-                    break;
+            if (protoman->target_state == PROTOMAN_STATE_PAUSED) {
+                /* Skip RESUMING if current target state is PAUSED */
+                _protoman_state_change(protoman, PROTOMAN_STATE_PAUSING);
+            } else {
+                switch (_do_resume(protoman)) {
+                    case PROTOMAN_STATE_RETVAL_FINISHED:
+                        // XXX: or should we actually skip to CONNECTED
+                        _protoman_state_change(protoman, PROTOMAN_STATE_RESUMED);
+                        break;
+                }
             }
             break;
 
@@ -686,7 +746,7 @@ void protoman_event_handler(arm_event_s *event)
     if (!_layer_exists(protoman, layer)) {
         /* Don't poke further as it's likely the given layer was already freed
          * and this is just late event */
-        protoman_err("received event from non-existent layer");
+        protoman_info("received event from non-existent layer");
         return;
     }
 
@@ -829,6 +889,7 @@ struct protoman_s *protoman_open(protoman_id_t protoman_id,  protoman_event_cb_t
 
     if (protoman->tasklet_id < 0) {
         protoman_err("tasklet allocation failed with %d", protoman->tasklet_id);
+        PROTOMAN_FREE(protoman);
         return NULL;
     }
 

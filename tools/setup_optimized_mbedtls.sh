@@ -18,9 +18,10 @@
 if [ ! -d "../mbedtls" ]
 then
     cd ..
+    MBEDTLS_HASH="858e4325d2eb55274950e9335d0c08a1326069c2"
     git clone https://github.com/ARMmbed/mbedtls.git 
     cd mbedtls
-    git checkout -b baremetal -t origin/baremetal
+    git checkout "$MBEDTLS_HASH"
     cp -r ../tools/importer/ .
     cd importer
     make update

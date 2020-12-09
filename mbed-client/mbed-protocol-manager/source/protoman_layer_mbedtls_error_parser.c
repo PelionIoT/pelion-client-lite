@@ -18,7 +18,8 @@
 #include "mbed-protocol-manager/protoman_config.h"
 
 #ifndef PROTOMAN_OFFLOAD_TLS
-#include <stdint.h>
+
+#include "include/protoman_layer_mbedtls_error_parser.h"
 
 #include "mbedtls/net.h"
 #include "mbedtls/ssl.h"
@@ -28,14 +29,11 @@
 #include "mbedtls/x509.h"
 #include "mbedtls/x509_crt.h"
 
+#include <stdint.h>
 
-#include "include/protoman_layer_mbedtls_error_parser.h"
-
+#ifdef PROTOMAN_ERROR_STRING
 const char *protoman_strmbedtls_handshake(int state)
 {
-#ifndef PROTOMAN_ERROR_STRING
-    return "?";
-#else
     switch (state) {
         case MBEDTLS_SSL_HELLO_REQUEST:
             return "MBEDTLS_SSL_HELLO_REQUEST";
@@ -78,14 +76,10 @@ const char *protoman_strmbedtls_handshake(int state)
         default:
             return "UNKNOWN";
     }
-#endif // PROTOMAN_ERROR_STRING
 }
 
 const char *protoman_strmbedtls(int errcode)
 {
-#ifndef PROTOMAN_ERROR_STRING
-    return "?";
-#else
     switch (errcode) {
         case MBEDTLS_ERR_SSL_FEATURE_UNAVAILABLE:
             return "MBEDTLS_ERR_SSL_FEATURE_UNAVAILABLE";
@@ -230,6 +224,6 @@ const char *protoman_strmbedtls(int errcode)
         default:
             return "UNKNOWN";
     }
-#endif // PROTOMAN_ERROR_STRING
 }
-#endif
+#endif // PROTOMAN_ERROR_STRING
+#endif // !PROTOMAN_OFFLOAD_TLS

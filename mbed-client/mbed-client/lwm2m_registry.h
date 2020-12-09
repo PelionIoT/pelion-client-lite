@@ -413,6 +413,8 @@ typedef registry_status_t (*registry_callback_t)(registry_callback_type_t,
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
                                                  registry_t *
 #else
+                                                 /* This is actually `endpoint_t *´, but due to circular dependencies
+                                                  * between lwm2m_endpoint.h and lwm2m_notifier.h it can't be used here. */
                                                  void *
 #endif
                                                  );

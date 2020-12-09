@@ -18,10 +18,18 @@
 #ifndef FOTA_FOTA_EVENT_HANDLER_H_
 #define FOTA_FOTA_EVENT_HANDLER_H_
 
+#include "fota_base.h"
+
+#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "fota_internal.h"
 
 typedef  void (*fota_deferred_data_callabck_t)(uint8_t *data, size_t size);
-typedef  void (*fota_deferred_result_callabck_t)(uint32_t token, int32_t status);
+typedef  void (*fota_deferred_result_callabck_t)(int32_t status);
 
 /*
  * Initialize event handler
@@ -54,10 +62,24 @@ int fota_event_handler_defer_with_data(
 /*
  * Defer execution of a FOTA callback with error details
  * /param cb callback function pointer to be deferred
- * /param token callback token - used by FOTA application interfaces
  * /status a status code
  */
 void fota_event_handler_defer_with_result(
-    fota_deferred_result_callabck_t cb, uint32_t token, int32_t status);
+    fota_deferred_result_callabck_t cb, int32_t status);
+
+/*
+ * Defer execution of a FOTA callback with error details
+ * /param cb callback function pointer to be deferred
+ * In case event system is busy - ignore the result
+ * /status a status code
+ */
+void fota_event_handler_defer_with_result_ignore_busy(
+    fota_deferred_result_callabck_t cb, int32_t status);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
 
 #endif // FOTA_FOTA_EVENT_HANDLER_H_

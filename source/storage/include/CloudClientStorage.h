@@ -37,37 +37,58 @@ extern "C" {
 #else // not defined MBED_CLOUD_CLIENT_STORAGE_KEY_LIST_FILE
 
 // The supported storage keys
-
 //TODO: this should be removed once mbed_cloud_client_get_rot_128bit() removed from CloudClientStorageCommon.cpp
 #define ROOT_OF_TRUST                           "ROOT_OF_TRUST" // "ROT"           /* not used, should be removed */
 
 #define INTERNAL_ENDPOINT                       "INTERNAL_ENDPOINT" // "IEP"
+/*Factory configuration parameters
+  the names defined here https://github.com/ARMmbed/factory-configurator-client/blob/master/factory-configurator-client/source/factory_configurator_client.c  */
+#if MBED_CONF_MBED_CLOUD_CLIENT_STORAGE_TYPE == KCM
+/*KCM module adds pelion prefix according to parameter's type
+ for example "mbed.EndpointName" -> "pelion_wCfgParam_mbed.EndpointName" */
+#define ENDPOINT_NAME                           "mbed.EndpointName" // "EP"            /* needed by factory client - value can't be modified */
+#define BOOTSTRAP_SERVER_URI                    "mbed.BootstrapServerURI" // "BsUri"
+#define BOOTSTRAP_SERVER_ROOT_CA_CERTIFICATE    "mbed.BootstrapServerCACert" // "BsCACert"
+#define BOOTSTRAP_DEVICE_CERTIFICATE            "mbed.BootstrapDeviceCert" // "BsDevCert"
+#define BOOTSTRAP_DEVICE_PRIVATE_KEY            "mbed.BootstrapDevicePrivateKey" // "BsDevKey"
+#define LWM2M_SERVER_URI                        "mbed.LwM2MServerURI" // "LwM2MUri"      /* needed by factory client - value can't be modified */
+#define LWM2M_SERVER_ROOT_CA_CERTIFICATE        "mbed.LwM2MServerCACert" // "LwM2MCACert"   /* needed by factory client - value can't be modified */
+#define LWM2M_DEVICE_CERTIFICATE                "mbed.LwM2MDeviceCert" // "DevCert"       /* needed by factory client - value can't be modified */
+#define LWM2M_DEVICE_PRIVATE_KEY                "mbed.LwM2MDevicePrivateKey" // "DevKey"        /* needed by factory client - value can't be modified */
+#define UPDATE_VENDOR_ID                        "mbed.VendorId" // "FWVendorId"
+#define UPDATE_CLASS_ID                         "mbed.ClassId" // "FWClassId"
+#define UPDATE_CERTIFICATE                      "mbed.UpdateAuthCert" // "FWUpdateCert"
+#define UPDATE_PUBKEY                           "mbed.UpdatePubKey"
+#else
 #define ENDPOINT_NAME                           "pelion_wCfgParam_mbed.EndpointName" // "EP"            /* needed by factory client - value can't be modified */
-#define BOOTSTRAP_SERVER_PSK_IDENTITY           "BOOTSTRAP_SERVER_PSK_IDENTITY" // "BsPskId"
-#define BOOTSTRAP_SERVER_PSK_SECRET             "BOOTSTRAP_SERVER_PSK_SECRET" // "BsPskSc"
 #define BOOTSTRAP_SERVER_URI                    "pelion_wCfgParam_mbed.BootstrapServerURI" // "BsUri"
 #define BOOTSTRAP_SERVER_ROOT_CA_CERTIFICATE    "pelion_wCrtae_mbed.BootstrapServerCACert" // "BsCACert"
 #define BOOTSTRAP_DEVICE_CERTIFICATE            "pelion_wCrtae_mbed.BootstrapDeviceCert" // "BsDevCert"
 #define BOOTSTRAP_DEVICE_PRIVATE_KEY            "pelion_wPrvKey_mbed.BootstrapDevicePrivateKey" // "BsDevKey"
-#define LWM2M_SERVER_PSK_IDENTITY               "LWM2M_SERVER_PSK_IDENTITY" // "LwM2MPskId"
-#define LWM2M_SERVER_PSK_SECRET                 "LWM2M_SERVER_PSK_SECRET" // "LwM2MPskSc"
 #define LWM2M_SERVER_URI                        "pelion_wCfgParam_mbed.LwM2MServerURI" // "LwM2MUri"      /* needed by factory client - value can't be modified */
 #define LWM2M_SERVER_ROOT_CA_CERTIFICATE        "pelion_wCrtae_mbed.LwM2MServerCACert" // "LwM2MCACert"   /* needed by factory client - value can't be modified */
 #define LWM2M_DEVICE_CERTIFICATE                "pelion_wCrtae_mbed.LwM2MDeviceCert" // "DevCert"       /* needed by factory client - value can't be modified */
 #define LWM2M_DEVICE_PRIVATE_KEY                "pelion_wPrvKey_mbed.LwM2MDevicePrivateKey" // "DevKey"        /* needed by factory client - value can't be modified */
+#define UPDATE_VENDOR_ID                        "pelion_wCfgParam_mbed.VendorId" // "FWVendorId"
+#define UPDATE_CLASS_ID                         "pelion_wCfgParam_mbed.ClassId" // "FWClassId"
+#define UPDATE_CERTIFICATE                      "pelion_wCrtae_mbed.UpdateAuthCert" // "FWUpdateCert"
+#define UPDATE_PUBKEY                           "pelion_wCrtae_mbed.UpdatePubKey"
+#endif
+
+
+//TODO: this should be removed once mbed_cloud_client_get_rot_128bit() removed from CloudClientStorageCommon.cpp
+#define ROOT_OF_TRUST                           "ROOT_OF_TRUST" // "ROT"           /* not used, should be removed */
+#define INTERNAL_ENDPOINT                       "INTERNAL_ENDPOINT" // "IEP"
+#define BOOTSTRAP_SERVER_PSK_IDENTITY           "BOOTSTRAP_SERVER_PSK_IDENTITY" // "BsPskId"
+#define BOOTSTRAP_SERVER_PSK_SECRET             "BOOTSTRAP_SERVER_PSK_SECRET" // "BsPskSc"
+#define LWM2M_SERVER_PSK_IDENTITY               "LWM2M_SERVER_PSK_IDENTITY" // "LwM2MPskId"
+#define LWM2M_SERVER_PSK_SECRET                 "LWM2M_SERVER_PSK_SECRET" // "LwM2MPskSc"
 #define UPDATE_PSK_IDENTITY                     "UPDATE_PSK_IDENTITY"
 #define UPDATE_PSK_SECRET                       "UPDATE_PSK_SECRET"
 #define KEY_VENDOR_ID                           "KEY_VENDOR_ID"
 #define KEY_CLASS_ID                            "KEY_CLASS_ID"
-
-#define UPDATE_VENDOR_ID                        "pelion_wCfgParam_mbed.VendorId" // "FWVendorId"
-#define UPDATE_CLASS_ID                         "pelion_wCfgParam_mbed.ClassId" // "FWClassId"
 #define UPDATE_FINGERPRINT                      "UPDATE_FINGERPRINT" // "FWFngrprnt"
-#define UPDATE_CERTIFICATE                      "pelion_wCrtae_mbed.UpdateAuthCert" // "FWUpdateCert"
-#define UPDATE_PUBKEY                           "pelion_wCrtae_mbed.UpdatePubKey"
-
 #define SSL_SESSION_DATA                        "SSL_SESSION_DATA" // "SslSessionDt"
-
 #define FOTA_ENCRYPT_KEY                        "FOTA_ENCRYPT_KEY" // "FTEncryptKey"
 #define FOTA_SALT_KEY                           "FOTA_SALT_KEY" // ""FTSaltKey"
 #define FOTA_MANIFEST_KEY                       "FOTA_MANIFEST_KEY" // ""FTManKey"

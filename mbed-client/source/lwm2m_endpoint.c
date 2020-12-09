@@ -44,8 +44,10 @@
 
 #define TRACE_GROUP "lwEP"
 
-static const char MCC_VERSION[] = "mccv=1.2.1-lite";
-
+static const char MCC_VERSION[] = "mccv=1.3.0-lite";
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
+static const char iep_name_parameter[] ="iep="; /* Internal endpoint name*/
+#endif //MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 static const char ep_name_parameter[]  = "ep="; /* Endpoint name. A unique name for the registering node in a domain.  */
 static const uint8_t resource_path[] = {'r', 'd'}; /* For resource directory */
 #ifdef MBED_CONF_MBED_CLIENT_REGISTER_RESOURCE_NAME
@@ -67,8 +69,7 @@ static const char resource_value[] = {'v', '='}; /* Resource value */
 #endif
 
 static int endpoint_register_endpoint(endpoint_t *endpoint, sn_nsdl_addr_s *address, const char *uri_query_parameters);
-static int endpoint_unregister_endpoint(endpoint_t *endpoint, sn_nsdl_addr_s *address);
-static int endpoint_update_endpoint_registration(endpoint_t *endpoint, sn_nsdl_addr_s *address);
+static int endpoint_update_or_unregister_endpoint(endpoint_t *endpoint, sn_nsdl_addr_s *address, uint8_t message_type);
 static int endpoint_oma_bootstrap(endpoint_t *endpoint, sn_nsdl_addr_s *bootstrap_address_ptr, const char *uri_query_parameters);
 static int endpoint_send_pending_message(endpoint_t *endpoint);
 static int endpoint_internal_coap_send(endpoint_t *endpoint, sn_coap_hdr_s *coap_header_ptr, sn_nsdl_addr_s *dst_addr_ptr, uint8_t message_description);
@@ -427,19 +428,39 @@ static void read_query_parameters(const endpoint_t *endpoint, char *address_copy
 {
     char* query;
     query = query_string(address_copy);
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
+    int32_t iep_size = 0;
+    if (endpoint->message_type == ENDPOINT_MSG_BOOTSTRAP) {
+        storage_read_internal_endpoint_name(NULL, &iep_size, true);
+    }
+#endif // MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 
     if (query != NULL) {
         size_t query_len = 1 + strlen(query) + 1 + strlen(MCC_VERSION) + 1;
         if (endpoint->custom_uri_query_params) {
             query_len += 1 + strlen(endpoint->custom_uri_query_params);
         }
-
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
+        if (iep_size > 0) {
+            query_len += 1 + strlen(iep_name_parameter) + iep_size;
+        }
+#endif // MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
         if (query_len <= MAX_URI_QUERY_LEN) {
             strcpy(uri_query_params, "&");
             strcat(uri_query_params, query);
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
+            if (iep_size > 0) {
+                char iep[MAX_VALUE_LENGTH];
+                strcat(uri_query_params, "&");
+                strcat(uri_query_params, iep_name_parameter);
+                iep[iep_size] = '\0'; //strcat need null char
+                if (NULL !=storage_read_internal_endpoint_name(iep, &iep_size, true)){
+                    strcat(uri_query_params, iep);
+                }
+            }
+#endif // MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
             strcat(uri_query_params, "&");
             strcat(uri_query_params, MCC_VERSION);
-
             if (endpoint->custom_uri_query_params) {
                 strcat(uri_query_params, "&");
                 strcat(uri_query_params, endpoint->custom_uri_query_params);
@@ -488,7 +509,7 @@ static int endpoint_send_pending_message(endpoint_t *endpoint)
     }
 
     if (endpoint->message_type == ENDPOINT_MSG_UPDATE) {
-        if (ENDPOINT_STATUS_OK != endpoint_update_endpoint_registration(endpoint, &address)) {
+        if (ENDPOINT_STATUS_OK != endpoint_update_or_unregister_endpoint(endpoint, &address, endpoint->message_type)) {
             return ENDPOINT_STATUS_ERROR;
         }
     } else if (endpoint->message_type == ENDPOINT_MSG_REGISTER) {
@@ -502,7 +523,7 @@ static int endpoint_send_pending_message(endpoint_t *endpoint)
         }
     } else if (endpoint->message_type == ENDPOINT_MSG_UNREGISTER) {
 
-        if (ENDPOINT_STATUS_OK != endpoint_unregister_endpoint(endpoint, &address)) {
+        if (ENDPOINT_STATUS_OK != endpoint_update_or_unregister_endpoint(endpoint, &address, endpoint->message_type)) {
             return ENDPOINT_STATUS_ERROR;
         }
     } else if (endpoint->message_type == ENDPOINT_MSG_UNDEFINED) {
@@ -889,96 +910,59 @@ static int endpoint_register_endpoint(endpoint_t *endpoint, sn_nsdl_addr_s *addr
     return status;
 }
 
-static int endpoint_unregister_endpoint(endpoint_t *endpoint, sn_nsdl_addr_s *address)
+static int endpoint_update_or_unregister_endpoint(endpoint_t *endpoint, sn_nsdl_addr_s *address, uint8_t message_type)
 {
     /* Local variables */
-    sn_coap_hdr_s *unregister_message_ptr;
+    sn_coap_hdr_s *message_ptr;
     int status;
-
-    /* Memory allocation for unregister message */
-    unregister_message_ptr = sn_coap_parser_alloc_message(endpoint->coap);
-    if (!unregister_message_ptr) {
-        return ENDPOINT_STATUS_ERROR;
-    }
-
-    /* Fill unregister message */
-    unregister_message_ptr->msg_type = COAP_MSG_TYPE_CONFIRMABLE;
-    unregister_message_ptr->msg_code = COAP_MSG_CODE_REQUEST_DELETE;
-
-    if (endpoint->location) {
-        unregister_message_ptr->uri_path_len = strlen(endpoint->location);
-        unregister_message_ptr->uri_path_ptr = (uint8_t*)endpoint->location;
-        /*NOTE: uri_path_ptr MUST be set as NULL before sn_coap_parser_release_allocated_coap_msg_mem,
-         *      as we do not want to free endpoint->location. */
-
-        /* Send message */
-        status = endpoint_internal_coap_send(endpoint, unregister_message_ptr, address, ENDPOINT_MSG_UNREGISTER);
-
-        unregister_message_ptr->uri_path_ptr = NULL;
-
-    } else {
-        // According to OMA LWM2M spec 8.2.3, the server MUST return the location on register,
-        // so this branch is not necessarily even needed.
-        tr_error("endpoint_unregister_endpoint: location not specified");
-        status = ENDPOINT_STATUS_ERROR;
-    }
-
-    /* Free memory */
-    sn_coap_parser_release_allocated_coap_msg_mem(endpoint->coap, unregister_message_ptr);
-
-    return status;
-}
-
-// XXX: this function could be combined with endpoint_unregister_endpoint(), as the CoAP method is the
-// largest difference between them, and perhaps the update should not have the uri parameters.
-static int endpoint_update_endpoint_registration(endpoint_t *endpoint, sn_nsdl_addr_s *address)
-{
-
-    /* Local variables */
-    sn_coap_hdr_s *register_message_ptr;
-    int status;
-
-    /*** Build endpoint register update message ***/
 
     /* Allocate memory for header struct */
-    register_message_ptr = sn_coap_parser_alloc_message(endpoint->coap);
-    if (register_message_ptr == NULL) {
+    message_ptr = sn_coap_parser_alloc_message(endpoint->coap);
+    if (message_ptr == NULL) {
         return ENDPOINT_STATUS_ERROR;
     }
 
     /* Fill message fields -> confirmable post to specified NSP path */
-    register_message_ptr->msg_type = COAP_MSG_TYPE_CONFIRMABLE;
-    register_message_ptr->msg_code = COAP_MSG_CODE_REQUEST_POST;
+    message_ptr->msg_type = COAP_MSG_TYPE_CONFIRMABLE;
 
+    if (message_type == ENDPOINT_MSG_UPDATE) {
+        /*** Build endpoint register update message ***/
+        message_ptr->msg_code = COAP_MSG_CODE_REQUEST_POST;
 
-    /* Allocate memory for the extended options list */
-    if (sn_coap_parser_alloc_options(endpoint->coap, register_message_ptr) == NULL) {
-        sn_coap_parser_release_allocated_coap_msg_mem(endpoint->coap, register_message_ptr);
-        return 0;
-    }
+        /* Allocate memory for the extended options list */
+        if (sn_coap_parser_alloc_options(endpoint->coap, message_ptr) == NULL) {
+            sn_coap_parser_release_allocated_coap_msg_mem(endpoint->coap, message_ptr);
+            return 0;
+        }
 
-    /* Fill Uri-query options */
-    endpoint_fill_uri_query_options(endpoint, register_message_ptr, true, NULL);
+        /* Fill Uri-query options */
+        endpoint_fill_uri_query_options(endpoint, message_ptr, true, NULL);
 
-    /* Build payload */
-    if (endpoint_build_registration_body(endpoint, register_message_ptr, 1, NULL) == ENDPOINT_STATUS_ERROR) {
-        sn_coap_parser_release_allocated_coap_msg_mem(endpoint->coap, register_message_ptr);
-        return ENDPOINT_STATUS_ERROR;
+#ifdef MBED_CLIENT_ENABLE_DYNAMIC_CREATION
+        /* Build payload */
+        if (endpoint_build_registration_body(endpoint, message_ptr, 1, NULL) == ENDPOINT_STATUS_ERROR) {
+            sn_coap_parser_release_allocated_coap_msg_mem(endpoint->coap, message_ptr);
+            return ENDPOINT_STATUS_ERROR;
+        }
+#endif
+
+    } else {
+        /*** Build endpoint unregister message ***/
+        message_ptr->msg_code = COAP_MSG_CODE_REQUEST_DELETE;
     }
 
     if (endpoint->location) {
 
-        register_message_ptr->uri_path_len = strlen(endpoint->location);
-        register_message_ptr->uri_path_ptr = (uint8_t*)endpoint->location;
+        message_ptr->uri_path_len = strlen(endpoint->location);
+        message_ptr->uri_path_ptr = (uint8_t*)endpoint->location;
         /*NOTE: uri_path_ptr MUST be set as NULL before sn_coap_parser_release_allocated_coap_msg_mem,
          *      as we do not want to free endpoint->location. */
 
         /* Send message */
-        status = endpoint_internal_coap_send(endpoint, register_message_ptr, address, ENDPOINT_MSG_UPDATE);
+        status = endpoint_internal_coap_send(endpoint, message_ptr, address, message_type);
 
-        register_message_ptr->uri_path_ptr = NULL;
+        message_ptr->uri_path_ptr = NULL;
 
-        /* Free memory */
     } else {
         // According to OMA LWM2M spec 8.2.3, the server MUST return the location on register,
         // so this branch is not necessarily even needed.
@@ -986,9 +970,11 @@ static int endpoint_update_endpoint_registration(endpoint_t *endpoint, sn_nsdl_a
         status = ENDPOINT_STATUS_ERROR;
     }
 
-    lwm2m_free(register_message_ptr->payload_ptr);
-
-    sn_coap_parser_release_allocated_coap_msg_mem(endpoint->coap, register_message_ptr);
+    /* Free memory */
+#ifdef MBED_CLIENT_ENABLE_DYNAMIC_CREATION
+    lwm2m_free(message_ptr->payload_ptr);
+#endif
+    sn_coap_parser_release_allocated_coap_msg_mem(endpoint->coap, message_ptr);
 
     return status;
 }
@@ -1106,7 +1092,6 @@ static int endpoint_internal_coap_send(endpoint_t *endpoint, sn_coap_hdr_s *coap
 
 static bool endpoint_handle_endpoint_response(endpoint_t *endpoint, sn_coap_hdr_s *coap_header)
 {
-
     uint32_t error_status = ENDPOINT_EVENT_STATUS_CONNECTION_ERROR;
 
     if (coap_header->token_len != sizeof(endpoint->message_token) ||
@@ -1127,29 +1112,35 @@ static bool endpoint_handle_endpoint_response(endpoint_t *endpoint, sn_coap_hdr_
         coap_header->coap_status != COAP_STATUS_OK ||
         COAP_MSG_CODE_RESPONSE_CHANGED < coap_header->msg_code) {
         switch (endpoint->message_type) {
-
             case ENDPOINT_MSG_UPDATE:
                 endpoint_send_event(endpoint, ENDPOINT_EVENT_ERROR_REREGISTER, error_status);
                 break;
 
             case ENDPOINT_MSG_REGISTER:
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
+                if (COAP_MSG_CODE_RESPONSE_BAD_REQUEST == coap_header->msg_code) {
+                    error_status = ENDPOINT_EVENT_STATUS_RESPONSE_BAD_REQUEST;
+                } else if (COAP_MSG_CODE_RESPONSE_FORBIDDEN == coap_header->msg_code) {
+                    error_status = ENDPOINT_EVENT_STATUS_RESPONSE_FORBIDDEN;
+                }
+#endif // MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
                 endpoint_send_event(endpoint, ENDPOINT_EVENT_ERROR_REGISTER, error_status);
                 break;
 
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
             case ENDPOINT_MSG_BOOTSTRAP:
                 endpoint_send_event(endpoint, ENDPOINT_EVENT_ERROR_BOOTSTRAP, error_status);
                 break;
+#endif
 
             case ENDPOINT_MSG_UNREGISTER:
                 endpoint_send_event(endpoint, ENDPOINT_EVENT_ERROR_DEREGISTER, error_status);
                 break;
 
             case ENDPOINT_MSG_UNDEFINED:
-                tr_warn("endpoint_handle_response() unhandled CoAP error");
+                tr_warn("endpoint_handle_endpoint_response() unhandled CoAP error");
                 return true;
-
         }
-
     } else {
 
         switch (endpoint->message_type) {
@@ -1168,10 +1159,11 @@ static bool endpoint_handle_endpoint_response(endpoint_t *endpoint, sn_coap_hdr_
                 endpoint_send_event(endpoint, ENDPOINT_EVENT_REGISTERED, ENDPOINT_EVENT_STATUS_OK);
                 break;
 
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
             case ENDPOINT_MSG_BOOTSTRAP:
                 endpoint_send_event(endpoint, ENDPOINT_EVENT_BOOTSTRAP_SENT, ENDPOINT_EVENT_STATUS_OK);
                 break;
-
+#endif
             case ENDPOINT_MSG_UNREGISTER:
                 endpoint_send_event(endpoint, ENDPOINT_EVENT_DEREGISTERED, ENDPOINT_EVENT_STATUS_OK);
                 break;
@@ -2422,7 +2414,7 @@ uint8_t* write_resource_value(uint8_t *packet, const registry_path_t *path, int3
             case LWM2M_RESOURCE_TYPE_INTEGER:
                 if (registry_get_value_int(&endpoint->registry, path, &int_value) == REGISTRY_STATUS_OK) {
                     size_t int_len = endpoint_itoa_len(int_value);
-                    uint8_t int_ptr[21];
+                    uint8_t int_ptr[REGISTRY_INT64_STRING_MAX_LEN];
                     endpoint_itoa((uint8_t*)&int_ptr, int_value);
                     packet = write_parameter(packet,
                                              resource_value,
@@ -2515,24 +2507,18 @@ void endpoint_register_object_handler(endpoint_t *endpoint, object_handler_t *ha
     }
 }
 
-void endpoint_remove_object_handler(endpoint_t *endpoint, uint16_t object_id)
+void endpoint_deallocate_object_handlers(endpoint_t *endpoint)
 {
-    object_handler_t *temp = endpoint->object_handlers;
-    object_handler_t *prev = NULL;
-    while (temp) {
-        if (temp->object_id == object_id) {
-            object_handler_t *to_free = temp;
-            if (prev) {
-                prev->next = temp->next;
-            } else {
-                endpoint->object_handlers = temp->next;
-            }
-            lwm2m_free(to_free);
-            break;
-        }
-        prev = temp;
-        temp = temp->next;
+    object_handler_t *to_free = endpoint->object_handlers;
+    object_handler_t *next;
+
+    while (to_free) {
+        next = to_free->next;
+        lwm2m_free(to_free);
+        to_free = next;
     }
+
+    endpoint->object_handlers = NULL;
 }
 
 object_handler_t *endpoint_allocate_object_handler(uint16_t object_id, get_resources_cb *res_cb,
@@ -2558,6 +2544,19 @@ static uint16_t get_auto_obs_id(endpoint_t *endpoint)
         endpoint->auto_obs_token = 1;
     }
     return endpoint->auto_obs_token;
+}
+
+static uint8_t *encode_resource_value_int(int64_t value, uint8_t *ptr, size_t *len)
+{
+    const size_t buf_len = *len;
+
+    *len = endpoint_itoa_len(value);
+
+    assert(ptr);
+    assert(buf_len >= *len);
+    ((void)buf_len);
+
+    return endpoint_itoa(ptr, value);
 }
 
 register_resource_t *endpoint_create_register_resource_str(endpoint_t *endpoint,
@@ -2609,19 +2608,12 @@ register_resource_t *endpoint_create_register_resource_int(endpoint_t *endpoint,
                                                            bool auto_obs,
                                                            int64_t value)
 {
-    size_t int_len = endpoint_itoa_len(value);
-    uint8_t *int_ptr = lwm2m_alloc(int_len);
+    uint8_t int_buf[REGISTRY_INT64_STRING_MAX_LEN];
+    size_t len = sizeof(int_buf);
 
-    if (!int_ptr) {
-        tr_error("endpoint_create_register_resource_int - failed to allocate buffer");
-        return NULL;
-    }
+    encode_resource_value_int(value, int_buf, &len);
 
-    endpoint_itoa(int_ptr, value);
-
-    register_resource_t * res = endpoint_create_register_resource_str(endpoint, id, auto_obs, int_ptr, int_len);
-    lwm2m_free(int_ptr);
-    return res;
+    return endpoint_create_register_resource_str(endpoint, id, auto_obs, int_buf, len);
 }
 
 register_resource_t *endpoint_create_register_resource_opaque(endpoint_t *endpoint,
@@ -2687,5 +2679,35 @@ registry_callback_t endpoint_get_object_callback(endpoint_t *endpoint, uint16_t 
         return handler->obj_cb;
     }
     return NULL;
+}
+
+int endpoint_send_notification_int(endpoint_t *endpoint, uint16_t object_id, uint16_t aobs_id, int64_t value)
+{
+    int ret = -1;
+    uint16_t token;
+    uint8_t int_buf[REGISTRY_INT64_STRING_MAX_LEN];
+    size_t len = sizeof(int_buf);
+
+    tr_debug("endpoint_send_notification(), object id: %d", object_id);
+
+    assert(endpoint);
+
+    if (endpoint->notifier.notifying) {
+        tr_debug("a notification is already pending");
+        return NOTIFICATION_STATUS_RESEND_QUEUE_FULL;
+    }
+
+    encode_resource_value_int(value, int_buf, &len);
+
+    // swap token byte order
+    token = (aobs_id & 0xFF00) >> 8 | (aobs_id & 0xFF) << 8;
+
+    ret = notifier_send_observation_notification(endpoint, endpoint->lifetime, (uint8_t*)&token, sizeof(token), int_buf, len, COAP_CT_TEXT_PLAIN);
+    if (ret == NOTIFICATION_STATUS_SENT) {
+        endpoint->notifier.last_notified = object_id;
+        endpoint->notifier.notifying = true;
+    }
+
+    return ret;
 }
 #endif

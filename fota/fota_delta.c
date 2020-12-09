@@ -27,8 +27,8 @@
 
 #include "fota/fota_status.h"
 #include "fota/fota_header_info.h"
-#include "update-client-hub/delta-tool-internal/include/bspatch.h"
-#include "update-client-hub/delta-tool-internal/include/bspatch_private.h" //For bspatch_stream
+#include "bspatch.h"
+#include "bspatch_private.h" //For bspatch_stream
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -41,7 +41,6 @@
 
 
 typedef struct fota_delta_ctx_s {
-    struct bspatch_stream bs_patch_stream;
     // To keep internal state of which bspatch event is currently going to be completed
     bs_patch_api_event_t next_event_to_post;
     // to store bspatch original seek diff and use it in original read
@@ -66,6 +65,7 @@ typedef struct fota_delta_ctx_s {
     uint32_t outgoing_frag_ptr_offset;
     // current fw reader function
     fota_component_curr_fw_read curr_fw_read;
+    struct bspatch_stream bs_patch_stream;
 } fota_delta_ctx_t;
 
 /*
@@ -77,7 +77,7 @@ typedef struct fota_delta_ctx_s {
  *
  * \return bs_patch_api_return_code_t EBSAPI_OPERATION_DONE_IMMEDIATELY or error code
  */
-bs_patch_api_return_code_t original_read(const struct bspatch_stream *stream, void *buffer, uint64_t length);
+bs_patch_api_return_code_t original_read(const struct bspatch_stream *stream, void *buffer, size_t length);
 
 /*
  * BsPatch callback function to Read Patch/Delta data/payload
@@ -109,7 +109,7 @@ bs_patch_api_return_code_t original_seek(const struct bspatch_stream *stream, in
  *
  * \return bs_patch_api_return_code_t EBSAPI_OPERATION_DONE_IMMEDIATELY or error
  */
-bs_patch_api_return_code_t new_write(const struct bspatch_stream *stream, void *buffer, uint64_t length);
+bs_patch_api_return_code_t new_write(const struct bspatch_stream *stream, void *buffer, size_t length);
 
 /*
  *Will loop BS patch event
@@ -182,7 +182,7 @@ int fota_delta_get_next_fw_frag(
 
     int status = FOTA_STATUS_SUCCESS;
     DBG("[DELTA] fota_delta_get_next_fw_frag next_event_to_post=%d outgoing_frag_size=%d", ctx->next_event_to_post, ctx->outgoing_frag_size);
-    if (ctx->outgoing_frag_ptr == NULL &&
+    if (ctx->outgoing_frag_ptr == NULL ||
             ctx->outgoing_frag_size == 0) {
         // if nothing to copy
         *fw_frag_actual_size = 0;
@@ -276,7 +276,7 @@ bs_patch_api_return_code_t read_patch(
         // We need to signal main bspatch-loop we have (in Write?)
         // to break so that we can get more patch data in.
         DBG("[DELTA] read_patch(length=%" PRIu32 ") EBSAPI_OPERATION_PATCH_READ_WILL_COMPLETE_LATER", length);
-        copy_amount = (uint64_t)(delta_ctx->incoming_frag_size - delta_ctx->incoming_frag_ptr_offset);
+        copy_amount = (delta_ctx->incoming_frag_size - delta_ctx->incoming_frag_ptr_offset);
         return_code = EBSAPI_OPERATION_PATCH_READ_WILL_COMPLETE_LATER;
 
     } else {
@@ -294,13 +294,13 @@ bs_patch_api_return_code_t read_patch(
 bs_patch_api_return_code_t original_read(
     const struct bspatch_stream *stream,
     void *buffer,
-    uint64_t length)
+    size_t length)
 {
     fota_delta_ctx_t *delta_ctx = (fota_delta_ctx_t *)stream->opaque;
     FOTA_DBG_ASSERT(delta_ctx);
     // always return 0. No need to check
-    uint32_t num_read = 0;
-    int status = delta_ctx->curr_fw_read(buffer, (uint32_t)delta_ctx->bspatch_seek_diff, length, &num_read);
+    size_t num_read = 0;
+    int status = delta_ctx->curr_fw_read(buffer, (size_t)delta_ctx->bspatch_seek_diff, length, &num_read);
     if ((status == 0) || (num_read == length)) {
         DBG("[DELTA] original_read(offset=%" PRIu64 ", length=%" PRIu64 ")", delta_ctx->bspatch_seek_diff, length);
         delta_ctx->bspatch_seek_diff += length;
@@ -326,7 +326,7 @@ bs_patch_api_return_code_t original_seek(
 bs_patch_api_return_code_t new_write(
     const struct bspatch_stream *stream,
     void *buffer,
-    uint64_t length)
+    size_t length)
 {
     fota_delta_ctx_t *delta_ctx = (fota_delta_ctx_t *)stream->opaque;
     FOTA_DBG_ASSERT(delta_ctx);

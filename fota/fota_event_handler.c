@@ -37,26 +37,24 @@ typedef struct {
     size_t size;
 } fota_cb_buffer_t;
 
-typedef struct {
-    uint32_t token;
-    int32_t  status;
-} fota_cb_token_t;
-
 typedef union {
     fota_cb_buffer_t buffer;
-    fota_cb_token_t result;
+    int32_t status;
 } fota_cb_args_t;
 
 
 typedef struct {
-    arm_event_storage_t event_storage;
     void *cb;
     fota_cb_args_t args;
     bool is_pending_event;
-    int8_t tasklet_id;
+    arm_event_storage_t event_storage;
+
 } fota_event_handler_ctx_t;
 
 static fota_event_handler_ctx_t g_ctx = { 0 };
+
+// keep tasklet id separate because it can't be reset as part of the context on reinitialization
+static int8_t g_tasklet_id = -1;
 
 static void event_handler(arm_event_t *event)
 {
@@ -93,7 +91,7 @@ static void event_handler(arm_event_t *event)
     } else { // FOTA_EVENT_EXECUTE_WITH_RESULT
 
         fota_deferred_result_callabck_t cb = (fota_deferred_result_callabck_t)ctx->cb;
-        cb(ctx->args.result.token, ctx->args.result.status);
+        cb(ctx->args.status);
     }
 }
 
@@ -103,8 +101,10 @@ int fota_event_handler_init(void)
 
     memset(&g_ctx, 0, sizeof(g_ctx));
 
-    g_ctx.tasklet_id = eventOS_event_handler_create(event_handler, FOTA_EVENT_INIT);
-    FOTA_ASSERT(g_ctx.tasklet_id >= 0);
+    if (g_tasklet_id < 0) {
+        g_tasklet_id = eventOS_event_handler_create(event_handler, FOTA_EVENT_INIT);
+        FOTA_ASSERT(g_tasklet_id >= 0);
+    }
 
     return FOTA_STATUS_SUCCESS;
 }
@@ -136,7 +136,7 @@ int fota_event_handler_defer_with_data(
     }
 
     g_ctx.event_storage.data.priority = ARM_LIB_LOW_PRIORITY_EVENT;
-    g_ctx.event_storage.data.receiver = g_ctx.tasklet_id;
+    g_ctx.event_storage.data.receiver = g_tasklet_id;
     g_ctx.event_storage.data.event_type  = FOTA_EVENT_EXECUTE_WITH_BUFFER;
     g_ctx.event_storage.data.data_ptr = (void *)&g_ctx;
 
@@ -146,20 +146,30 @@ int fota_event_handler_defer_with_data(
 }
 
 void fota_event_handler_defer_with_result(
-    fota_deferred_result_callabck_t cb, uint32_t token, int32_t status)
+    fota_deferred_result_callabck_t cb, int32_t status)
 {
     FOTA_ASSERT(!g_ctx.is_pending_event);
     g_ctx.is_pending_event = true;
     g_ctx.cb = (void *)cb;
-    g_ctx.args.result.token = token;
-    g_ctx.args.result.status = status;
+    g_ctx.args.status = status;
 
     g_ctx.event_storage.data.priority = ARM_LIB_LOW_PRIORITY_EVENT;
-    g_ctx.event_storage.data.receiver = g_ctx.tasklet_id;
+    g_ctx.event_storage.data.receiver = g_tasklet_id;
     g_ctx.event_storage.data.event_type  = FOTA_EVENT_EXECUTE_WITH_RESULT;
     g_ctx.event_storage.data.data_ptr = (void *)&g_ctx;
 
     eventOS_event_send_user_allocated(&g_ctx.event_storage);
+}
+
+void fota_event_handler_defer_with_result_ignore_busy(
+    fota_deferred_result_callabck_t cb, int32_t status)
+{
+    if (!g_ctx.is_pending_event) {
+        fota_event_handler_defer_with_result(cb, status);
+    } else {
+        //ignore the call
+        FOTA_TRACE_INFO("FOTA ignore busy event");
+    }
 }
 
 #endif  // MBED_CLOUD_CLIENT_FOTA_ENABLE

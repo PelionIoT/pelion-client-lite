@@ -51,7 +51,7 @@ typedef enum {
  *
  * \note only required if MBED_CLOUD_CLIENT_FOTA_ENABLE build flag is specified
  * \note the FW versions in this callback are in internal library format and should be converted to string using fota_component_version_int_to_semver() before use.
- * \param[in] token callback token The token is expected to be passed to fota_app_authorize() or fota_app_reject()
+ * \param[in] token (unused)
  * \param[in] candidate_info update candidate descriptor
  * \param[in] curr_fw_version current component FW version
  * \return FOTA_STATUS_SUCCESS for acknowledgment that authorization callback was received properly by the application.
@@ -74,8 +74,9 @@ int fota_app_on_download_authorization(
  *   - fota_app_defer() - defer the install to a later later phase. This will mark the candidate as valid but will not perform reboot
  *
  * \note only required if MBED_CLOUD_CLIENT_FOTA_ENABLE build flag is specified
+ * \note after deferring the installation by fota_app_defer() call - fota_app_resume() call will have no effect - reboot is required for installing the candidate.
  *
- * \param[in] token callback token The token is expected to be passed to fota_app_authorize() or fota_app_reject()
+ * \param[in] token (unused)
  * \return FOTA_STATUS_SUCCESS for acknowledgment that authorization callback was received properly by the application.
  */
 int fota_app_on_install_authorization(uint32_t token);
@@ -99,28 +100,33 @@ int fota_app_on_complete(int32_t status);
 void fota_app_resume(void);
 
 /**
- * Authorize Pelion FOTA client to proceed with an update.
+ * Authorize Pelion FOTA client to proceed with an update
  *
  * This API expected to be called from fota_app_on_authorization_request() application callback.
  *
  * \param[in] token request token as received in fota_app_on_authorization_request().
  * \note unexpected token considered as unrecoverable programming error and will cause panic.
+ *
+ *  \deprecated Use the fota_app_authorize_update
  */
-void fota_app_authorize(uint32_t token);
+void fota_app_authorize(uint32_t token) fota_deprecated;
 
 /**
- * Reject Pelion FOTA update.
+ * Reject Pelion FOTA update
  *
  * This API expected to be called from fota_app_on_authorization_request() application callback.
  *
  * \param[in] token  request token as received in fota_app_on_authorization_request().
  * \param[in] reason reject reason code.
  * \note unexpected token considered as unrecoverable programming error and will cause panic.
+ *
+ *  \deprecated Use the fota_app_reject_update
+ *
  */
-void fota_app_reject(uint32_t token, int32_t reason);
+void fota_app_reject(uint32_t token, int32_t reason) fota_deprecated;
 
 /**
- * Defer Pelion FOTA update.
+ * Defer Pelion FOTA update
  *
  * FOTA client resources will be released and update will be reattempted on next boot or by
  * calling fota_app_resume() API.
@@ -128,8 +134,40 @@ void fota_app_reject(uint32_t token, int32_t reason);
  *
  * \param[in] token request token as received in fota_app_on_authorization_request().
  * \note unexpected token considered as unrecoverable programming error and will cause panic.
+ *
+ *  \deprecated Use the fota_app_defer_update
  */
-void fota_app_defer(uint32_t token);
+void fota_app_defer(uint32_t token) fota_deprecated;
+
+
+/**
+ * Authorize Pelion FOTA client to proceed with an update.
+ *
+ * This API expected to be called from fota_app_on_authorization_request() application callback.
+ *
+ * \param[in] token request token as received in fota_app_on_authorization_request().
+ * \note unexpected token considered as unrecoverable programming error and will cause panic.
+ */
+void fota_app_authorize_update(void);
+
+/**
+ * Reject Pelion FOTA update.
+ *
+ * This API expected to be called from fota_app_on_authorization_request() application callback.
+ *
+ * \param[in] reason reject reason code.
+ */
+void fota_app_reject_update(int32_t reason);
+
+/**
+ * Defer Pelion FOTA update.
+ *
+ * FOTA client resources will be released and update will be reattempted on next boot or by
+ * calling fota_app_resume() API.
+ * This API expected to be called from fota_app_on_authorization_request() application callback.
+ */
+void fota_app_defer_update(void);
+
 
 /**
  * Progress bar support for Pelion FOTA update.
@@ -141,7 +179,25 @@ void fota_app_defer(uint32_t token);
  * \param[in] current downloaded chunk size in bytes
  * \param[in] total image size in bytes
  */
-void fota_app_on_download_progress(uint32_t downloaded_size, uint32_t current_chunk_size, uint32_t total_size);
+void fota_app_on_download_progress(size_t downloaded_size, size_t current_chunk_size, size_t total_size);
+
+
+#if defined(TARGET_LIKE_LINUX)
+
+/**
+ * Pelion FOTA install callback to be implemented by application.
+ *
+ * The callback is expected to install the candidate and return FOTA_STATUS_SUCCESS or reboot the system.
+ *
+ * \param[in] candidate_fs_name candidate file name
+ * \param[in] firmware_info parsed update manifest
+ *
+ * \return FOTA_STATUS_SUCCESS for successful installation or error code.
+ */
+
+int fota_app_on_install_candidate(const char *candidate_fs_name, const manifest_firmware_info_t *firmware_info);
+
+#endif // defined(TARGET_LIKE_LINUX)
 
 #ifdef __cplusplus
 }

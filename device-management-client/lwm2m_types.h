@@ -39,11 +39,9 @@ typedef enum registry_callback_type_e {
     REGISTRY_CALLBACK_BLOCKMESSAGE_INCOMING, ///< Message block received for the Resource.
     REGISTRY_CALLBACK_BLOCKMESSAGE_OUTGOING, ///< Message block is being sent.
     REGISTRY_CALLBACK_NOTIFICATION_STATUS, ///< Notification status has changed.
-#ifdef MBED_CONF_MBED_CLIENT_ENABLE_CPP_API
     REGISTRY_CALLBACK_ITEM_REMOVED, ///< Registry Object, Resource or Instance was removed.
     REGISTRY_CALLBACK_ITEM_REPLACED, ///< Registry Object, Resource or Instance was removed, but will be added again.
     REGISTRY_CALLBACK_ITEM_ADDED ///< Registry Object, Resource or Instance was added.
-#endif // MBED_CONF_MBED_CLIENT_ENABLE_CPP_API
 } registry_callback_type_t;
 
 
@@ -162,7 +160,9 @@ typedef struct registry_path_s {
     uint16_t object_instance_id; ///< Object Instance ID, for example value 1 in all applicable IDs translates to /1/1.
     uint16_t resource_id; ///< Resource ID, for example value 1 in all applicable IDs translates to /1/1/1.
     uint16_t resource_instance_id;///< Resource Instance ID, for example value 1 in all applicable IDs translates to /1/1/1/1.
-    unsigned path_type:2; ///< This field describes which other fields are valid inside this structure.
+
+    // this needs only 2 bits, but a bitfield wastes 300 bytes of ROM while saving nothing in RAM
+    uint8_t  path_type; ///< This field describes which other fields are valid inside this structure.
 
 } registry_path_t;
 
@@ -226,11 +226,11 @@ typedef struct registry_listing_s {
     /**
      * This field MUST be set as `REGISTRY_LISTING_ALL`, `REGISTRY_LISTING_DIRECTORY` or `REGISTRY_LISTING_RECURSIVE`.
      */
-    unsigned listing_type:4;
-    unsigned value_set:1; ///< This bit is set as 1 if a value is available for the current Resource.
-    unsigned parameters_set:1; ///< This bit is set as 1 if observation parameters are available for the current Resource.
-    unsigned registered:1; ///< This bit is set if the Resource has been registered.
-    unsigned set_registered:1; ///< This bit MUST be set as 0, unless the user wants to set the registered bit as 1.
+    uint8_t listing_type;
+    uint8_t value_set; ///< This bit is set as 1 if a value is available for the current Resource.
+    uint8_t parameters_set; ///< This bit is set as 1 if observation parameters are available for the current Resource.
+    uint8_t registered; ///< This bit is set if the Resource has been registered.
+    uint8_t set_registered; ///< This bit MUST be set as 0, unless the user wants to set the registered bit as 1.
 
     struct registry_object_s *object;            ///< For internal use only, MUST NOT be accessed from application.
     struct registry_object_s *object_instance;   ///< For internal use only, MUST NOT be accessed from application.

@@ -260,6 +260,10 @@ int8_t connection_send_data(connection_t *connection, uint8_t *data, const size_
 
 }
 
+#if MBED_CONF_MBED_CLOUD_CLIENT_USE_HARDCODED_ADDRESS
+static uint8_t null_address[4] = {0, 0, 0, 0};
+#endif
+
 int8_t connection_read_data(connection_t *connection, uint8_t **data, size_t *data_len, uint8_t **address, uint8_t *address_len, uint16_t *port)
 {
     struct protoman_io_bytes_s msg;
@@ -276,16 +280,25 @@ int8_t connection_read_data(connection_t *connection, uint8_t **data, size_t *da
 
     *data = msg.buf;
 
+#if MBED_CONF_MBED_CLOUD_CLIENT_USE_HARDCODED_ADDRESS
+    *address = null_address;
+    *address_len = 4;
+    *port = 4;
+#else
     *address = protoman_get_info(&connection->protoman, NULL, PROTOMAN_INFO_IP_BYTES);
     *address_len = *(size_t *)protoman_get_info(&connection->protoman, NULL, PROTOMAN_INFO_IP_LEN);
     *port = *(uint16_t *)protoman_get_info(&connection->protoman, NULL, PROTOMAN_INFO_PORT);
-
+#endif
     return CONNECTION_STATUS_OK;
-
 }
 
 int8_t connection_get_server_address(connection_t *connection, uint8_t **address, uint8_t *address_len, uint16_t *port)
 {
+#if MBED_CONF_MBED_CLOUD_CLIENT_USE_HARDCODED_ADDRESS
+    *address = null_address;
+    *address_len = 4;
+    *port = 4;
+#else
     *address = protoman_get_info(&connection->protoman, NULL, PROTOMAN_INFO_IP_BYTES);
     *address_len = 0;
     *port = 0;
@@ -304,6 +317,7 @@ int8_t connection_get_server_address(connection_t *connection, uint8_t **address
     } else {
         return CONNECTION_STATUS_ERROR_GENERIC;
     }
+#endif
 
     return CONNECTION_STATUS_OK;
 }

@@ -35,16 +35,17 @@
 extern "C" {
 #endif
 
-typedef struct endpoint_s endpoint_t;
 
 /*
  * Initialize Pelion FOTA component.
  *
- * This method should be called once on system strut-up.
- * \param[in] in_endpoint Mbed Cloud Client Lite LWM2M Endpoint instance
+ * This method should be called once on system startup.
+ * \param[in] m2m_interface Mbed Cloud Client Lite LWM2M interface
+ * \param[inout] resource_list a resource list to be populated with new FOTA objects
  * \return FOTA_STATUS_SUCCESS on success
  */
-int fota_init(endpoint_t *in_endpoint);
+int fota_init(void *m2m_interface, void *resource_list);
+
 
 /*
  * Deinitialize Pelion FOTA component.

@@ -52,11 +52,12 @@ typedef enum send_queue_sender_e {
 typedef struct send_queue_s {
 
     timeout_t *timeout; ///< Used for adding delay to scheduling.
-    send_queue_sender_t pending:5; ///< This field tracks what message types are currently pending for sending.
-    unsigned last_sender:3; ///< Type of the last message sent, used for scheduling different types in turns.
+
+    send_queue_sender_t pending; ///< This field tracks what message types are currently pending for sending.
+    uint8_t last_sender; ///< Type of the last message sent, used for scheduling different types in turns.
                             ///< Does not include `SEND_QUEUE_ENDPOINT` as it always gets sent first if requested.
                             ///< `unsigned` instead of `send_queue_sender_t` as we are not using the `SEND_QUEUE_ENDPOINT` with this field.
-    bool sending_in_progress:1; ///< True if message sending is in progress.
+    bool sending_in_progress; ///< True if message sending is in progress.
 
 } send_queue_t;
 

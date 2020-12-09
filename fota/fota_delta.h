@@ -19,9 +19,12 @@
 #ifndef __FOTA_DELTA_H_
 #define __FOTA_DELTA_H_
 
+#include "fota/fota_base.h"
+
+#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+
 #if !defined(FOTA_DISABLE_DELTA)
 
-#include "fota/fota_base.h"
 #include "fota/fota_component.h"
 
 #ifdef __cplusplus
@@ -46,5 +49,7 @@ int fota_delta_finalize(fota_delta_ctx_t **ctx);
 #endif
 
 #endif  // !defined(FOTA_DISABLE_DELTA)
+
+#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
 
 #endif // __FOTA_DELTA_H_

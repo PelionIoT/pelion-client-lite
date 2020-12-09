@@ -20,6 +20,9 @@
 #define __FOTA_MANIFEST_H_
 
 #include "fota/fota_base.h"
+
+#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+
 #include "fota/fota_crypto_defs.h"
 #include "fota/fota_component.h"
 
@@ -43,8 +46,8 @@ typedef struct {
     uint64_t       version;                                      /*< FW version (timestamp). */
     uint32_t       priority;                                     /*< Update priority. */
     uint32_t       payload_format;                               /*< Payload format. */
-    uint32_t       payload_size;                                 /*< Payload size to be downloaded. */
-    uint32_t       installed_size;                               /*< Installed FW size. In case payload_format equals FOTA_MANIFEST_PAYLOAD_FORMAT_RAW  the value is equal to payload_size. */
+    size_t         payload_size;                                 /*< Payload size to be downloaded. */
+    size_t         installed_size;                               /*< Installed FW size. In case payload_format equals FOTA_MANIFEST_PAYLOAD_FORMAT_RAW  the value is equal to payload_size. */
     uint8_t        payload_digest[FOTA_CRYPTO_HASH_SIZE];        /*< Payload SHA226 digest - for verifying downloaded payload integrity. */
     char           uri[FOTA_MANIFEST_URI_SIZE];                  /*< Payload URI for downloading the payload. */
     uint8_t        installed_digest[FOTA_CRYPTO_HASH_SIZE];      /*< Installed FW SHA256 digest. In case payload_format equals FOTA_MANIFEST_PAYLOAD_FORMAT_RAW  the value is equal to payload_digest. */
@@ -76,5 +79,7 @@ int fota_manifest_parse(
 #ifdef __cplusplus
 }
 #endif
+
+#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
 
 #endif // __FOTA_MANIFEST_H_

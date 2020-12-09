@@ -19,17 +19,14 @@
 #include <string.h>
 #include <stdint.h>
 
-/*! \file functionpointer.h
-* \brief A collection of classes for storing and calling a pointer to a static or member void function.
- */
+/*! \file functionpointer.h \brief Header for function pointer classes */
 
-/*! \class FP0
- *  \brief A class for storing and calling a pointer to a static or member void function.
- */
+
+/** Pointer to a function with no parameters. */
 template <typename R>
 class FP0{
 public:
-    /** \brief Create a function pointer with an attached static function.
+    /** Create a function pointer, attaching a static function.
      *
      *  \param function The void static function to attach (default is none).
      */
@@ -38,29 +35,29 @@ public:
         attach(function);
     }
 
-    /** \brief Create a function pointer with an attached member function.
+    /** Create a function pointer, attaching a member function.
      *
      *  \param object The object pointer to invoke the member function on (the "this" pointer).
-     *  \param member The address of the void member function to attach.
+     *  \param function The address of the void member function to attach.
      */
     template<typename T>
     FP0(T *object, R (T::*member)(void)) {
         attach(object, member);
     }
 
-    /** \brief Attach a static function.
+    /** Attach a static function.
      *
-     *  \param function The void static function to attach. Default is none.
+     *  \param function The void static function to attach (default is none).
      */
     void attach(R (*function)(void)) {
         _p.function = function;
         _membercaller = 0;
     }
 
-    /** \brief Attach a member function.
+    /** Attach a member function.
      *
      *  \param object The object pointer to invoke the member function on (the "this" pointer).
-     *  \param member The address of the void member function to attach.
+     *  \param function The address of the void member function to attach.
      */
     template<typename T>
     void attach(T *object, R (T::*member)(void)) {
@@ -69,7 +66,7 @@ public:
         _membercaller = &FP0::membercaller<T>;
     }
 
-    /** \brief Call the attached static or member function.
+    /** Call the attached static or member function.
      */
     R call(){
         if (_membercaller == 0 && _p.function) {
@@ -111,13 +108,11 @@ private:
 
 /* If we had variadic templates, this wouldn't be a problem, but until C++11 is enabled, we are stuck with multiple classes... */
 
-/*! \class FP1
- * \brief A class for storing and calling a pointer to a static or member void function
- */
+/** Pointer to a function with one parameter. */
 template <typename R, typename A1>
 class FP1{
 public:
-    /** \brief Create a function pointer, attaching a static function.
+    /** Create a function pointer, attaching a static function.
      *
      *  \param function The void static function to attach (default is none).
      */
@@ -126,7 +121,7 @@ public:
         attach(function);
     }
 
-    /** \brief Create a function pointeer, attaching a member function.
+    /** Create a function pointeer, attaching a member function.
      *
      *  \param object The object pointer to invoke the member function on (the "this" pointer).
      *  \param member The address of the void member function to attach.
@@ -136,7 +131,7 @@ public:
         attach(object, member);
     }
 
-    /** \brief Attach a static function.
+    /** Attach a static function.
      *
      *  \param function The void static function to attach (default is none).
      */
@@ -145,7 +140,7 @@ public:
         _membercaller = 0;
     }
 
-    /** \brief Attach a member function.
+    /** Attach a member function.
      *
      *  \param object The object pointer to invoke the member function on (the "this" pointer).
      *  \param member The address of the void member function to attach.
@@ -157,7 +152,7 @@ public:
         _membercaller = &FP1::membercaller<T>;
     }
 
-    /** \brief Call the attached static or member function.
+    /** Call the attached static or member function.
      */
     R call(A1 a){
         if (_membercaller == 0 && _p.function) {
@@ -197,13 +192,11 @@ private:
     R (*_membercaller)(void*, uintptr_t*, A1); // registered membercaller function to convert back and call _m.member on _object
 };
 
-/*! \class FP2
- *  \brief A class for storing and calling a pointer to a static or member void function.
- */
+/** Pointer to a function with two parameters */
 template <typename R, typename A1, typename A2>
 class FP2{
 public:
-    /** \brief Create a function pointer, attaching a static function.
+    /** Create a function pointer, attaching a static function.
      *
      *  \param function The void static function to attach (default is none).
      */
@@ -212,7 +205,7 @@ public:
         attach(function);
     }
 
-    /** \brief Create a function pointer, attaching a member function.
+    /** Create a function pointer, attaching a member function.
      *
      *  \param object The object pointer to invoke the member function on (the "this" pointer).
      *  \param member The address of the void member function to attach.
@@ -222,7 +215,7 @@ public:
         attach(object, member);
     }
 
-    /** \brief Attach a static function.
+    /** Attach a static function.
      *
      *  \param function The void static function to attach (default is none).
      */
@@ -231,7 +224,7 @@ public:
         _membercaller = 0;
     }
 
-    /** \brief Attach a member function
+    /** Attach a member function
      *
      *  \param object The object pointer to invoke the member function on (the "this" pointer).
      *  \param member The address of the void member function to attach.
@@ -243,7 +236,7 @@ public:
         _membercaller = &FP2::membercaller<T>;
     }
 
-    /** \brief Call the attached static or member function.
+    /** Call the attached static or member function.
      */
     R call(A1 a1, A2 a2){
         if (_membercaller == 0 && _p.function) {
@@ -283,13 +276,11 @@ private:
     R (*_membercaller)(void*, uintptr_t*, A1, A2); // registered membercaller function to convert back and call _m.member on _object
 };
 
-/*! \class FP3
- *  \brief A class for storing and calling a pointer to a static or member void function.
- */
+/** Pointer to a function with three parameters */
 template <typename R, typename A1, typename A2, typename A3>
 class FP3{
 public:
-    /** \brief Create a function pointer, attaching a static function.
+    /** Create a function pointer, attaching a static function.
      *
      *  \param function The void static function to attach (default is none).
      */
@@ -298,7 +289,7 @@ public:
         attach(function);
     }
 
-    /** \brief Create a function pointer, attaching a member function.
+    /** Create a function pointer, attaching a member function.
      *
      *  \param object The object pointer to invoke the member function on (the "this" pointer).
      *  \param member The address of the void member function to attach.
@@ -308,7 +299,7 @@ public:
         attach(object, member);
     }
 
-    /** \brief Attach a static function.
+    /** Attach a static function.
      *
      *  \param function The void static function to attach (default is none).
      */
@@ -317,7 +308,7 @@ public:
         _membercaller = 0;
     }
 
-    /** \brief Attach a member function.
+    /** Attach a member function.
      *
      *  \param object The object pointer to invoke the member function on (the "this" pointer).
      *  \param member The address of the void member function to attach.
@@ -329,7 +320,7 @@ public:
         _membercaller = &FP3::membercaller<T>;
     }
 
-    /** \brief Call the attached static or member function.
+    /** Call the attached static or member function.
      */
     R call(A1 a1, A2 a2, A3 a3){
         if (_membercaller == 0 && _p.function) {

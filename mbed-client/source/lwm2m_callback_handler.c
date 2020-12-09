@@ -104,13 +104,12 @@ void callback_handler_init(endpoint_t *endpoint)
 #else
     callback_handler.endpoint = endpoint;
 #endif
-    if(callback_handler.event_handler_id < 0) {
-        callback_handler.event_handler_id = eventOS_event_handler_create(&callback_event_handler,
-                                                                         CALLBACK_HANDLER_EVENT_INIT);
-    }
 
     if (callback_handler.event_handler_id < 0) {
-        tr_error("callback_handler_init, eventOS_event_handler_create failed!");
-        assert(0);
+        callback_handler.event_handler_id = eventOS_event_handler_create(&callback_event_handler, CALLBACK_HANDLER_EVENT_INIT);
+        if (callback_handler.event_handler_id < 0) {
+            tr_error("callback_handler_init, eventOS_event_handler_create failed!");
+            assert(0);
+        }
     }
 }

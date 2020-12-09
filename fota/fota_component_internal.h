@@ -20,6 +20,9 @@
 #define __FOTA_COMPONENT_INTERNAL_H_
 
 #include "fota/fota_base.h"
+
+#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+
 #include "fota/fota_component.h"
 
 #ifdef __cplusplus
@@ -27,8 +30,8 @@ extern "C" {
 #endif
 
 typedef struct {
-    fota_component_desc_info_t desc_info;
     fota_component_version_t version;
+    fota_component_desc_info_t desc_info;
     char name[FOTA_COMPONENT_MAX_NAME_SIZE];
 } fota_component_desc_t;
 
@@ -47,5 +50,7 @@ int fota_component_version_semver_to_int(const char *sem_ver, fota_component_ver
 #ifdef __cplusplus
 }
 #endif
+
+#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
 
 #endif // __FOTA_COMPONENT_INTERNAL_H_

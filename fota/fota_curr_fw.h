@@ -20,6 +20,9 @@
 #define __FOTA_CURR_FW_H_
 
 #include "fota/fota_base.h"
+
+#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+
 #include "fota_header_info.h"
 
 #ifdef __cplusplus
@@ -67,7 +70,7 @@ static inline int fota_curr_fw_read_header(fota_header_info_t *header_info)
  * \param[out] num_read  Number of read bytes.
  * \return FOTA_STATUS_SUCCESS on success.
  */
-int fota_curr_fw_read(uint8_t *buf, uint32_t offset, uint32_t size, uint32_t *num_read);
+int fota_curr_fw_read(uint8_t *buf, size_t offset, size_t size, size_t *num_read);
 
 /**
  * Read digest from current firmware.
@@ -80,5 +83,6 @@ int fota_curr_fw_get_digest(uint8_t *buf);
 #ifdef __cplusplus
 }
 #endif
+#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
 
 #endif // __FOTA_CURR_FW_H_

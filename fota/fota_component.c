@@ -17,6 +17,7 @@
 // ----------------------------------------------------------------------------
 
 #include "fota/fota_base.h"
+#include <stdlib.h>
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
 
@@ -25,6 +26,13 @@
 #include "fota/fota_component.h"
 #include "fota/fota_component_internal.h"
 #include "fota/fota_status.h"
+
+#if defined(TARGET_LIKE_LINUX)
+#include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>
+#endif // defined(TARGET_LIKE_LINUX)
+
 #include <string.h>
 #include <stdlib.h>
 #include <inttypes.h>
@@ -36,6 +44,20 @@ static fota_component_desc_t comp_table[FOTA_NUM_COMPONENTS];
 #define MINOR_NUM_BITS 24
 #define SPLIT_NUM_BITS 16
 #define MAX_VER 999
+
+//num is between 0 and 999 (MAX_VER)
+static char *append_number_to_string(char *str, uint_fast16_t num, char trail) {
+    if (num > 100) {
+        char p = '0' + num/100;
+        *str++ = p;
+    }
+    if (num > 10) {
+        *str++ = '0' + (num%100)/10;
+    }
+    *str++ = '0' + (num%10);
+    *str++ = trail;
+    return str;
+}
 
 void fota_component_clean(void)
 {
@@ -49,7 +71,7 @@ int fota_component_add(const fota_component_desc_info_t *comp_desc_info, const c
     FOTA_ASSERT(!(comp_desc_info->support_delta && (!comp_desc_info->curr_fw_get_digest || !comp_desc_info->curr_fw_read)));
 
     memcpy(&comp_table[num_components].desc_info, comp_desc_info, sizeof(*comp_desc_info));
-    strncpy(comp_table[num_components].name, comp_name, FOTA_COMPONENT_MAX_NAME_SIZE);
+    strncpy(comp_table[num_components].name, comp_name, FOTA_COMPONENT_MAX_NAME_SIZE - 1);
     fota_component_version_semver_to_int(comp_semver, &comp_table[num_components].version);
 
     num_components++;
@@ -96,24 +118,30 @@ int fota_component_name_to_id(const char *name, unsigned int *comp_id)
 
 int fota_component_version_int_to_semver(fota_component_version_t version, char *sem_ver)
 {
-    uint64_t major, minor, split;
+#if MAJOR_NUM_BITS > 32 || MINOR_NUM_BITS > 32 || SPLIT_NUM_BITS > 32
+#error "Assuming 32-bit version components"
+#endif
+    uint32_t major, minor, split;
     uint64_t full_mask = 0xFFFFFFFFFFFFFFFFULL;
     int ret = FOTA_STATUS_SUCCESS;
+    char *tmp = sem_ver;
 
     split = version & ~(full_mask << SPLIT_NUM_BITS);
     minor = (version & ~(full_mask << (SPLIT_NUM_BITS + MINOR_NUM_BITS))) >> SPLIT_NUM_BITS;
     major = version >> (SPLIT_NUM_BITS + MINOR_NUM_BITS);
 
     if ((major > MAX_VER) || (minor > MAX_VER) || (split > MAX_VER)) {
-        ret = FOTA_STATUS_INVALID_ARGUMENT;
+        ret = FOTA_STATUS_INTERNAL_ERROR;
     }
-
+    //These are only needed if above check fails (unittests only)
     split = MIN(split, MAX_VER);
     minor = MIN(minor, MAX_VER);
     major = MIN(major, MAX_VER);
 
-    sprintf(sem_ver, "%" PRIu64 ".%" PRIu64 ".%" PRIu64, major, minor, split);
-
+    //ouput is "major.minor.split\0"
+    tmp = append_number_to_string(tmp, major, '.');
+    tmp = append_number_to_string(tmp, minor, '.');
+    tmp = append_number_to_string(tmp, split, '\0');
     return ret;
 }
 
@@ -121,7 +149,7 @@ int fota_component_version_semver_to_int(const char *sem_ver, fota_component_ver
 {
     // This better use signed strtol() instead of strtoul() as it is already used by other code
     // and there is no need to add more dependencies here. That change saves ~120B.
-    int64_t major, minor, split;
+    long major, minor, split;
     char *endptr;
     int ret = FOTA_STATUS_SUCCESS;
 
@@ -133,7 +161,7 @@ int fota_component_version_semver_to_int(const char *sem_ver, fota_component_ver
     if ((major < 0) || (major > MAX_VER) ||
             (minor < 0) || (minor > MAX_VER) ||
             (split < 0) || (split > MAX_VER)) {
-        ret = FOTA_STATUS_INVALID_ARGUMENT;
+        ret = FOTA_STATUS_INTERNAL_ERROR;
 
         // Unfortunately not all call sites of this handle the error, so this might as well
         // give stable output on error path too.
@@ -144,9 +172,43 @@ int fota_component_version_semver_to_int(const char *sem_ver, fota_component_ver
         minor = MIN(minor, MAX_VER);
         major = MIN(major, MAX_VER);
 
-        *version = split | minor << SPLIT_NUM_BITS | major << (SPLIT_NUM_BITS + MINOR_NUM_BITS);
+        *version = ((uint64_t) split) | ((uint64_t) minor << SPLIT_NUM_BITS) | ((uint64_t) major << (SPLIT_NUM_BITS + MINOR_NUM_BITS));
     }
     return ret;
 }
+
+#if defined(TARGET_LIKE_LINUX)
+
+extern char *program_invocation_name;
+
+int fota_component_install_main(const char *candidate_file_name)
+{
+    unsigned int file_mode = ALLPERMS;
+    struct stat statbuf;
+
+    FOTA_TRACE_INFO("Installing MAIN component");
+    
+    // get current file permissions
+    if (stat(program_invocation_name, &statbuf) == 0) {
+        file_mode = statbuf.st_mode & 0x1FF;
+    }
+
+    // unlink current file
+    if (unlink(program_invocation_name) != 0) {
+        FOTA_TRACE_ERROR("Failed to unlink file %s: %s", program_invocation_name, strerror(errno));
+        return FOTA_STATUS_INTERNAL_ERROR;
+    }
+
+    // change file permission to same as previously
+    chmod(candidate_file_name, file_mode);
+
+    if (rename(candidate_file_name, program_invocation_name) != 0) {
+        FOTA_TRACE_ERROR("Failed to rename file %s: %s", candidate_file_name, strerror(errno));
+        return FOTA_STATUS_INTERNAL_ERROR;
+    }
+
+    return FOTA_STATUS_SUCCESS;
+}
+#endif  //defined(TARGET_LIKE_LINUX)
 
 #endif  // MBED_CLOUD_CLIENT_FOTA_ENABLE

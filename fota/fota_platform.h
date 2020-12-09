@@ -20,6 +20,9 @@
 #define __FOTA_PLATFORM_H_
 
 #include "fota/fota_base.h"
+
+#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+
 #include "fota/fota_status.h"
 #include "fota/fota_block_device.h"
 #include "fota/fota_candidate.h"
@@ -60,20 +63,19 @@ int fota_platform_finish_update_hook(const char *comp_name);
 /**
  * Platform start update hook, called when update is aborted.
  *
- * \param[in] comp_name Component name.
+ * \param[in] comp_name  Component name.
+ * \param[in] abort_code Abort return code.
  * \return FOTA_STATUS_SUCCESS on success.
  */
 int fota_platform_abort_update_hook(const char *comp_name);
 
 #else
 
-#ifdef __MBED__
 // Default platform hooks
 static inline int fota_platform_init_hook(bool after_upgrade)
 {
     return FOTA_STATUS_SUCCESS;
 }
-#endif
 
 static inline int fota_platform_start_update_hook(const char *comp_name)
 {
@@ -96,4 +98,5 @@ static inline int fota_platform_abort_update_hook(const char *comp_name)
 }
 #endif
 
+#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
 #endif // __FOTA_PLATFORM_H_

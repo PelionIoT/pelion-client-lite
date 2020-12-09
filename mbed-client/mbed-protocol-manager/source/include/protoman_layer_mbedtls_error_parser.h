@@ -22,8 +22,24 @@
 extern "C" {
 #endif // __cplusplus
 
+#ifdef PROTOMAN_ERROR_STRING
 extern const char *protoman_strmbedtls_handshake(int state);
 extern const char *protoman_strmbedtls(int errcode);
+#else
+// if the error tracing is not needed, replace the functions with
+// inlined versions, which will remove the function call overhead.
+static inline const char *protoman_strmbedtls_handshake(int state)
+{
+    (void)state;
+    return "?";
+}
+
+static inline const char *protoman_strmbedtls(int errcode)
+{
+    (void)errcode;
+    return "?";
+}
+#endif
 
 #ifdef __cplusplus
 }

@@ -320,6 +320,10 @@ static sn_coap_hdr_s* handle_get_request(const registry_path_t* path, endpoint_t
     }
 
     coap_response->options_list_ptr = sn_coap_parser_alloc_options(endpoint->coap, coap_response);
+    if (!coap_response->options_list_ptr) {
+        coap_response->msg_code = COAP_MSG_CODE_RESPONSE_INTERNAL_SERVER_ERROR;
+        return coap_response;
+    }
 
     if (registry_get_max_age(&endpoint->registry, path, &coap_response->options_list_ptr->max_age) != REGISTRY_STATUS_OK) {
         tr_error("handle_get_request() could not read max_age from registry!");
@@ -1094,12 +1098,29 @@ bool handle_coap_response(endpoint_t* endpoint, sn_coap_hdr_s *received_coap_hea
 
     }
 #else
-    if (received_coap_header->coap_status == COAP_STATUS_BUILDER_MESSAGE_SENDING_FAILED) {
-        callback = endpoint_get_object_callback(endpoint, endpoint->confirmable_response.path.object_id);
-        if (callback) {
-            callback(REGISTRY_CALLBACK_EXECUTE, &endpoint->confirmable_response.path, NULL, NULL, NOTIFICATION_STATUS_SEND_FAILED, endpoint);
+    if (endpoint->notifier.message_id == received_coap_header->msg_id) {
+        registry_notification_status_t notification_status;
+        if (received_coap_header->msg_type == COAP_MSG_TYPE_ACKNOWLEDGEMENT) {
+            notification_status = NOTIFICATION_STATUS_DELIVERED;
+        } else if (received_coap_header->coap_status == COAP_STATUS_BUILDER_MESSAGE_SENDING_FAILED) {
+            notification_status = NOTIFICATION_STATUS_SEND_FAILED;
+        } else {
+            return false;
         }
-        endpoint_send_event(endpoint, ENDPOINT_EVENT_ERROR_TIMEOUT, received_coap_header->coap_status);
+
+        endpoint->notifier.notifying = false;
+        endpoint->notifier.message_id = 0;
+
+        callback = endpoint_get_object_callback(endpoint, endpoint->notifier.last_notified);
+        if (callback) {
+            // Call callback with NULL path. It's up to the sender of the notification to keep track of what notification is being sent
+            callback(REGISTRY_CALLBACK_NOTIFICATION_STATUS, NULL, NULL, NULL, notification_status, endpoint);
+        }
+        send_queue_sent(endpoint, true);
+
+        if (notification_status == NOTIFICATION_STATUS_SEND_FAILED) {
+            endpoint_send_event(endpoint, ENDPOINT_EVENT_ERROR_TIMEOUT, received_coap_header->coap_status);
+        }
     }
 #endif
 

@@ -26,8 +26,9 @@
  *  This file is part of mbed TLS (https://tls.mbed.org)
  */
 
-#ifndef MBEDTLS_CONFIG_H
-#define MBEDTLS_CONFIG_H
+#ifndef DEVICE_MANAGEMENT_CLIENT_MBED_TLS_CONFIG_LINUX_DEFAULT_H
+#define DEVICE_MANAGEMENT_CLIENT_MBED_TLS_CONFIG_LINUX_DEFAULT_H
+
 
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_DEPRECATE)
 #define _CRT_SECURE_NO_DEPRECATE 1
@@ -3416,4 +3417,4 @@
 
 #include "mbedtls/check_config.h"
 
-#endif /* MBEDTLS_CONFIG_H */
+#endif /* DEVICE_MANAGEMENT_CLIENT_MBED_TLS_CONFIG_LINUX_DEFAULT_H */

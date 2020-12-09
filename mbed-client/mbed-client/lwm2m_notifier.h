@@ -35,24 +35,32 @@ extern "C" {
  *  \brief Client Lite LwM2M Object registry notifier main data structure.
  */
 typedef struct notifier_s {
+    uint16_t message_id; ///< Message ID of the last notification or 0.
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    uint16_t last_notified;  ///< Object ID of the last Resource notified if `message_id` is not 0.
+#else
+    registry_path_t last_notified; ///< Path of the last Resource notified if `message_id` is not 0.
+
+    // Note: following bools were stored in a bitfields, but it wasted ~64B of ROM while saving only <2 bytes of RAM.
+    bool block_notify; ///< Flag set if notification sent using block transfer.
+    bool running; ///< Flag set if running.
+    bool notify_next; ///< Flag set if notification is requested for next Resource.
+#endif
+    bool notifying; ///< Flag set when currently notifying.
 
     struct endpoint_s *endpoint; ///< Pointer to associated endpoint.
-    int8_t event_handler_id; ///< Notifier event handler ID.
+    uint32_t notify_option_number; ///< Notification number, 24-bit counter.
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     uint32_t current_time; ///< Counting seconds.
     uint32_t next_event_time; ///< Time of next event, relative to `current_time`.
     uint32_t last_ticks; ///< Number of system ticks from last call.
-    uint32_t notify_option_number; ///< Notification number, 24-bit counter.
-    uint16_t message_id; ///< Message ID of the last notification or 0.
-    registry_path_t last_notified; ///< Path of the last Resource notified if `message_id` is not 0.
-    bool running:1; ///< Flag set if running.
-    bool notifying:1; ///< Flag set when currently notifying.
-    bool block_notify:1; ///< Flag set if notification sent using block transfer.
-    bool notify_next:1; ///< Flag set if notification is requested for next Resource.
-
+#endif
 } notifier_t;
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+
 /**
- * \brief Initialize the notifier. 
+ * \brief Initialize the notifier.
  * \note This is just intializing the structure. You still need to call `notifier_setup()`. In practice. this function is supposed to
  * be called from a constructor. After this, calling `notifier_stop()` is safe.
  *
@@ -155,6 +163,12 @@ void notifier_send_now(notifier_t *notifier);
  */
 void notifier_clear_notifications(notifier_t *notifier);
 
+#else // #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+
+int notifier_send_observation_notification(struct endpoint_s *endpoint, uint32_t max_age, uint8_t *token_ptr, uint8_t token_len,
+                                            uint8_t *payload_ptr, uint16_t payload_len, sn_coap_content_format_e content_format);
+
+#endif // #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 
 #ifdef __cplusplus
 }

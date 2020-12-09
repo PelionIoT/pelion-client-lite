@@ -35,11 +35,6 @@
 #define MAX_TLV_ID_SIZE 2
 #define TLV_TYPE_SIZE 1
 
-// -9223372036854775808 - +9223372036854775807
-// max length of int64_t string is 20 bytes + nil
-#define REGISTRY_INT64_STRING_MAX_LEN 21
-#define REGISTRY_INT8_STRING_MAX_LEN 4
-
 #if MBED_CLIENT_ENABLE_FLOAT_VALUE
 // (space needed for -3.402823 × 10^38) + (magic decimal 6 digits added as no precision is added to "%f") + trailing zero
 #define REGISTRY_FLOAT_STRING_MAX_LEN 48
