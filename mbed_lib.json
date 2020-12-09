@@ -3,8 +3,8 @@
     "config": {
         "use-insecure-rot": null,
         "storage-type": {
-            "help": "Select the storage type. KVSTORE is default choice. RAM is volatile storage and will not persist through reset, use it only for quick prototyping with developer certificates. EXTERNAL for other implementations.",
-            "accepted_values": ["KVSTORE", "RAM", "EXTERNAL"],
+            "help": "Select the storage type. KVSTORE is default choice. KCM configuration uses KCM fcc library APIs. RAM is volatile storage and will not persist through reset, use it only for quick prototyping with developer certificates. EXTERNAL for other implementations.",
+            "accepted_values": ["KVSTORE", "RAM", "EXTERNAL", "KCM"],
             "value": "KVSTORE"
         },
         "storage-reset-dev-credentials": {
@@ -34,6 +34,59 @@
             "accepted_values": [true, false],
             "value": true,
             "macro_name": "MBED_CLIENT_DISABLE_EST_FEATURE"
+        },
+        "dynamic-interface-alloc": {
+            "help": "Option to allocate lwm2m_interface_t instance dynamically from heap instead using a static variable.",
+            "macro_name": "MBED_CLOUD_CLIENT_DYNAMIC_INTERFACE_ALLOC",
+            "accepted_values": [true, false],
+            "value": false
+        },
+        "use-hardcoded-address": {
+            "help": "Use hardcoded IPv4 address 0.0.0.0 for use cases when device has no IP (LoRaWAN, Non-IP, etc)",
+            "accepted_values": [true, false],
+            "value": false
+        },
+        "enable-device-object-resource-6": {
+            "help": "Option to enable available power sources (3/0/6) resource. Platform code needs to provide a get_resource_device_available_power_sources().",
+            "macro_name": "MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_6",
+            "accepted_values": [true, null],
+            "value": null
+        },
+        "enable-device-object-resource-7": {
+            "help": "Option to enable power source voltage (3/0/7) resource. Platform code needs to provide a get_resource_device_power_source_voltage().",
+            "macro_name": "MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_7",
+            "accepted_values": [true, null],
+            "value": null
+        },
+        "enable-device-object-resource-8": {
+            "help": "Option to enable power source current (3/0/8) resource. Platform code needs to provide a get_resource_device_power_source_current().",
+            "macro_name": "MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_8",
+            "accepted_values": [true, null],
+            "value": null
+        },
+        "enable-device-object-resource-9": {
+            "help": "Option to enable battery level (3/0/9) resource. Platform code needs to provide a get_resource_device_battery_level().",
+            "macro_name": "MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_9",
+            "accepted_values": [true, null],
+            "value": null
+        },
+        "enable-device-object-resource-13": {
+            "help": "Option to enable current time (3/0/13) resource. Platform code needs to provide a get_resource_current_time().",
+            "macro_name": "MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_13",
+            "accepted_values": [true, null],
+            "value": null
+        },
+        "enable-device-object-resource-18": {
+            "help": "Option to enable hardware version (3/0/18) resource. Platform code needs to provide a get_resource_hardware_version().",
+            "macro_name": "MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_18",
+            "accepted_values": [true, null],
+            "value": null
+        },
+        "enable-device-object-resource-20": {
+            "help": "Option to enable battery status (3/0/20) resource. Platform code needs to provide a get_resource_device_battery_status().",
+            "macro_name": "MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_20",
+            "accepted_values": [true, null],
+            "value": null
         }
     },
     "macros" : [

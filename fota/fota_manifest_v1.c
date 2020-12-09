@@ -32,9 +32,6 @@
 #include "fota/fota_crypto_asn_extra.h"
 #include "fota/fota_nvm.h"
 #include "mbedtls/asn1.h"
-#include "mbedtls/sha256.h"
-#include "mbedtls/x509_crt.h"
-#include "mbedtls/pk.h"
 
 #if (FOTA_MANIFEST_SCHEMA_VERSION == 1)
 
@@ -194,7 +191,7 @@ int parse_payload_description(
 
     if (len > FOTA_CRYPTO_HASH_SIZE) {
         FOTA_TRACE_ERROR("ResourceReference:hash size is too big %zu", len);
-        return FOTA_STATUS_MANIFEST_PAYLOAD_CORRUPTED;
+        return FOTA_STATUS_MANIFEST_MALFORMED;
     }
     memcpy(fw_info->payload_digest, p, len);
     p += len;
@@ -219,7 +216,7 @@ int parse_payload_description(
     tls_status = mbedtls_asn1_get_int(&p, desc_end, (int *) &fw_info->payload_size);
     if (tls_status != 0) {
         FOTA_TRACE_ERROR("Error reading ResourceReference:size %d", tls_status);
-        return FOTA_STATUS_MANIFEST_PAYLOAD_CORRUPTED;
+        return FOTA_STATUS_MANIFEST_MALFORMED;
     }
     FOTA_MANIFEST_TRACE_DEBUG("ResourceReference:size %" PRIu32, fw_info->payload_size);
 
@@ -384,7 +381,7 @@ int parse_manifest_internal(
     if (tls_status == 0) {
         if (FOTA_MANIFEST_VENDOR_DATA_SIZE < len) {
             FOTA_TRACE_ERROR("Manifest:vendorInfo too long %zu", len);
-            return FOTA_STATUS_MANIFEST_WRONG_VENDOR_ID;
+            return FOTA_STATUS_MANIFEST_CUSTOM_DATA_TOO_BIG;
         }
         memcpy(fw_info->vendor_data, p, len);
 

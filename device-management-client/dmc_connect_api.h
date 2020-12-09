@@ -23,8 +23,6 @@
 * \brief API for connecting Device Management Client to the backend service
 */
 
-#ifndef MBED_CONF_MBED_CLIENT_ENABLE_CPP_API
-
 #include "lwm2m_interface.h"
 #include "lwm2m_registry.h"
 
@@ -97,6 +95,7 @@ void pdmc_connect_close(void);
 */
 lwm2m_interface_t *pdmc_connect_get_interface(void);
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 /**
 * \brief A helper function for adding Resources to Device Management (the Resources should be defined in `oma_lwm2m_object_defs.c`)
 * \param registry A pointer to the registry (use `pdmc_connect_get_interface` after `pdmc_connect_init` to
@@ -109,11 +108,28 @@ lwm2m_interface_t *pdmc_connect_get_interface(void);
 * \param callback A `registry_callback_t` type of a callback that will be notified on changes in a Resource.
 * \return `1` in success.
 */
-#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 int pdmc_connect_add_cloud_resource(registry_t *registry, registry_path_t *path,
                                         const uint16_t object, const uint16_t object_instance, const uint16_t resource,
                                         bool auto_observable, registry_callback_t callback);
-#endif
+
+/**
+* \brief A helper function for adding Resource instances to Device Management (the Resources should be defined in `oma_lwm2m_object_defs.c`)
+* \param registry A pointer to the registry (use `pdmc_connect_get_interface` after `pdmc_connect_init` to
+* get the registry from the interface's endpoint.
+* \param path The path to the Resource. This will be populated with parameters `object`, `object_instance` and `resource` given to this function call.
+* \param object Refers to the Object level in an OMA Object like "object/x/x", for example `300/0/0`.
+* \param object_instance Refers to the Object Instance level in an OMA Object like "x/object_instance/x", for example `300/1/0`.
+* \param resource Refers to the Resource level in OMA Object like "x/x/resource", for example `300/1/3`.
+* \param resource_instance Refers to the Resource instance level in OMA Object like "x/x/x/resource_instance", for example `300/1/3/4`.
+* \param auto_observable Auto observable Resources are updated to the service side automatically.
+* \param callback A `registry_callback_t` type of a callback that will be notified on changes in a Resource instances.
+* \return `1` in success.
+*/
+int pdmc_connect_add_cloud_resource_instance(registry_t *registry, registry_path_t *path,
+                                    const uint16_t object, const uint16_t object_instance, const uint16_t resource,
+                                    const uint16_t resource_instance,
+                                    bool auto_observable, registry_callback_t callback);
+#endif // !MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 
 /**
 * \brief Get information on a connected endpoint.
@@ -157,8 +173,6 @@ void pdmc_connect_pause(void);
  * \param iface A handler to the network interface.
  */
 void pdmc_connect_resume(void *iface);
-
-#endif // MBED_CONF_MBED_CLIENT_ENABLE_CPP_API
 
 #ifdef __cplusplus
 }

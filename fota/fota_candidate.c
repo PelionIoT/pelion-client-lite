@@ -34,20 +34,23 @@
 #define MIN_FRAG_SIZE 128
 
 typedef struct {
-    fota_header_info_t header_info;
-    uint32_t bd_read_size;
-    uint32_t bd_prog_size;
-    uint32_t curr_addr;
-    uint32_t data_start_addr;
+    size_t bd_read_size;
+    size_t bd_prog_size;
+    size_t   curr_addr;
+    size_t   data_start_addr;
     uint32_t effective_block_size;
     uint32_t block_checker_size;
     uint32_t frag_extra_bytes;
-    uint32_t bytes_completed;
+    size_t   bytes_completed;
     uint32_t install_alignment;
     uint8_t  *fragment_buf;
+
 #if (MBED_CLOUD_CLIENT_FOTA_ENCRYPTION_SUPPORT == 1)
     fota_encrypt_context_t *enc_ctx;
 #endif
+
+    fota_header_info_t header_info;
+
 } candidate_contex_t;
 
 static fota_candidate_config_t fota_candidate_config = {
@@ -77,7 +80,7 @@ const fota_candidate_config_t *fota_candidate_get_config(void)
     return (const fota_candidate_config_t *) &fota_candidate_config;
 }
 
-int fota_candidate_read_candidate_ready_header(uint32_t *addr, uint32_t bd_read_size, uint32_t bd_prog_size,
+int fota_candidate_read_candidate_ready_header(size_t *addr, uint32_t bd_read_size, uint32_t bd_prog_size,
                                                fota_candidate_ready_header_t *header)
 {
     int ret = FOTA_STATUS_SUCCESS;
@@ -86,7 +89,7 @@ int fota_candidate_read_candidate_ready_header(uint32_t *addr, uint32_t bd_read_
     uint8_t read_buf[sizeof(fota_candidate_ready_header_t)];
     uint8_t *aligned_read_buf = read_buf;
 
-    uint32_t chunk_size = fota_align_up(sizeof(fota_candidate_ready_header_t), bd_read_size);
+    uint32_t chunk_size = FOTA_ALIGN_UP(sizeof(fota_candidate_ready_header_t), bd_read_size);
 
     if (chunk_size > sizeof(read_buf)) {
         // This is very unlikely to happen, as read size is usually 1.
@@ -104,7 +107,7 @@ int fota_candidate_read_candidate_ready_header(uint32_t *addr, uint32_t bd_read_
     }
 
     // Advance read address for next calls
-    *addr += fota_align_up(chunk_size, bd_prog_size);
+    *addr += FOTA_ALIGN_UP(chunk_size, bd_prog_size);
 
     memcpy(header, aligned_read_buf, sizeof(fota_candidate_ready_header_t));
     if (header->magic != FOTA_CANDIDATE_READY_MAGIC) {
@@ -136,10 +139,10 @@ static void cleanup()
     ctx = 0;
 }
 
-int fota_candidate_read_header(uint32_t *addr, uint32_t bd_read_size, uint32_t bd_prog_size, fota_header_info_t *header)
+int fota_candidate_read_header(size_t *addr, uint32_t bd_read_size, uint32_t bd_prog_size, fota_header_info_t *header)
 {
     uint32_t header_size = (uint32_t) fota_get_header_size();
-    uint32_t read_size = fota_align_up(header_size, bd_read_size);
+    uint32_t read_size = FOTA_ALIGN_UP(header_size, bd_read_size);
 
     uint8_t *header_buf = (uint8_t *) malloc(read_size);
     if (!header_buf) {
@@ -148,7 +151,7 @@ int fota_candidate_read_header(uint32_t *addr, uint32_t bd_read_size, uint32_t b
     }
 
     int ret = fota_bd_read(header_buf, *addr, read_size);
-    *addr += fota_align_up(header_size, bd_prog_size);
+    *addr += FOTA_ALIGN_UP(header_size, bd_prog_size);
 
     if (ret) {
         goto end;
@@ -215,17 +218,17 @@ static int fota_candidate_extract_start(bool force_encrypt, const char *expected
         if (ctx->header_info.flags & FOTA_HEADER_ENCRYPTED_FLAG) {
 #if (MBED_CLOUD_CLIENT_FOTA_ENCRYPTION_SUPPORT == 0)
             FOTA_TRACE_ERROR("Encrypted candidate image - not supported");
-            ret = FOTA_STATUS_UNSUPPORTED;
+            ret = FOTA_STATUS_MANIFEST_PAYLOAD_UNSUPPORTED;
             goto fail;
 #endif
-            FOTA_TRACE_INFO("Found an encrypted image at address 0x%" PRIx32, fota_candidate_get_config()->storage_start_addr);
+            FOTA_TRACE_INFO("Found an encrypted image at address 0x%zx", fota_candidate_get_config()->storage_start_addr);
         } else  {
             if (force_encrypt) {
                 FOTA_TRACE_ERROR("Non-encrypted image found, but this is not allowed for this candidate type.");
-                ret = FOTA_STATUS_NOT_ALLOWED;
+                ret = FOTA_STATUS_MANIFEST_PAYLOAD_UNSUPPORTED;
                 goto fail;
             }
-            FOTA_TRACE_INFO("Found a non-encrypted image at address 0x%" PRIx32, fota_candidate_get_config()->storage_start_addr);
+            FOTA_TRACE_INFO("Found a non-encrypted image at address 0x%zx", fota_candidate_get_config()->storage_start_addr);
         }
 
         if (ctx->header_info.flags & (FOTA_HEADER_ENCRYPTED_FLAG | FOTA_HEADER_SUPPORT_RESUME_FLAG)) {
@@ -233,7 +236,7 @@ static int fota_candidate_extract_start(bool force_encrypt, const char *expected
         } else {
             block_size = MIN_FRAG_SIZE;
         }
-        block_size = fota_align_up(block_size, ctx->bd_read_size);
+        block_size = FOTA_ALIGN_UP(block_size, ctx->bd_read_size);
 
         // Block checker can be different here and have different sizes:
         // Tag (8 bytes) in encrypted case, checksum (2 bytes) in non-encrypted case (with resume support).
@@ -263,7 +266,7 @@ static int fota_candidate_extract_start(bool force_encrypt, const char *expected
                 goto fail;
             }
 
-            ctx->curr_addr = fota_align_up(ctx->curr_addr, ctx->bd_prog_size);
+            ctx->curr_addr = FOTA_ALIGN_UP(ctx->curr_addr, ctx->bd_prog_size);
         }
 #endif
 
@@ -303,9 +306,9 @@ fail:
     return ret;
 }
 
-static int fota_candidate_extract_fragment(uint8_t **buf, uint32_t *actual_size, bool *ignore)
+static int fota_candidate_extract_fragment(uint8_t **buf, size_t *actual_size, bool *ignore)
 {
-    uint32_t read_size;
+    size_t read_size;
     int ret;
 
     FOTA_DBG_ASSERT(ctx);
@@ -324,7 +327,7 @@ static int fota_candidate_extract_fragment(uint8_t **buf, uint32_t *actual_size,
         return FOTA_STATUS_SUCCESS;
     }
 
-    read_size = fota_align_up(ctx->block_checker_size + *actual_size, ctx->bd_read_size);
+    read_size = FOTA_ALIGN_UP(ctx->block_checker_size + *actual_size, ctx->bd_read_size);
 
     if (ctx->curr_addr + read_size >
             fota_candidate_get_config()->storage_start_addr + fota_candidate_get_config()->storage_size) {
@@ -386,21 +389,21 @@ static int fota_candidate_extract_fragment(uint8_t **buf, uint32_t *actual_size,
             ctx->frag_extra_bytes = *actual_size % ctx->install_alignment;
             *actual_size -= ctx->frag_extra_bytes;
         }
-        *actual_size = fota_align_up(*actual_size, ctx->install_alignment);
+        *actual_size = FOTA_ALIGN_UP(*actual_size, ctx->install_alignment);
     }
 
     return FOTA_STATUS_SUCCESS;
 }
 
-int fota_candidate_iterate_image(bool validate, bool force_encrypt, const char *expected_comp_name,
+int fota_candidate_iterate_image(uint8_t validate, bool force_encrypt, const char *expected_comp_name,
                                  uint32_t install_alignment, fota_candidate_iterate_handler_t handler)
 {
     int ret;
     fota_candidate_iterate_callback_info cb_info;
-    uint32_t actual_size = 0;
-    uint8_t *buf;
+    size_t actual_size = 0;
+    uint8_t *buf = NULL;
     fota_hash_context_t *hash_ctx = NULL;
-    bool ignore;
+    bool ignore = false;
 
     FOTA_ASSERT(handler);
 
@@ -409,7 +412,7 @@ int fota_candidate_iterate_image(bool validate, bool force_encrypt, const char *
         goto fail;
     }
 
-    if (validate) {
+    if (validate != FOTA_CANDIDATE_SKIP_VALIDATION) {
         FOTA_TRACE_INFO("Validating image...");
         uint8_t hash_output[FOTA_CRYPTO_HASH_SIZE];
 
@@ -521,7 +524,7 @@ fail:
 
 int fota_candidate_erase(void)
 {
-    uint32_t erase_size;
+    size_t erase_size;
     int ret = fota_bd_get_erase_size(fota_candidate_get_config()->storage_start_addr, &erase_size);
     if (ret) {
         return ret;

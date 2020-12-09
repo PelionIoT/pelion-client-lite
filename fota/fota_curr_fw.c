@@ -72,10 +72,9 @@ uint8_t *fota_curr_fw_get_app_header_addr(void)
     return NULL;
 #endif
 }
-
 #endif // defined(__MBED__)
 
-int fota_curr_fw_read(uint8_t *buf, uint32_t offset, uint32_t size, uint32_t *num_read)
+int fota_curr_fw_read(uint8_t *buf, size_t offset, size_t size, size_t *num_read)
 {
     fota_header_info_t header_info;
     int ret = FOTA_STATUS_INTERNAL_ERROR;

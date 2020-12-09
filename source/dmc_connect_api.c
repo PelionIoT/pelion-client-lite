@@ -25,18 +25,26 @@
 #include MBED_CLOUD_CLIENT_USER_CONFIG_FILE
 #endif
 
-#ifndef MBED_CONF_MBED_CLIENT_ENABLE_CPP_API
-
 #define PDMC_CONNECT_STARTUP_EVENT_TYPE 6
 
 #include "mbed-trace/mbed_trace.h"
+#include "mbed-client/lwm2m_endpoint.h"
 #include "mbed-client/lwm2m_interface.h"
 #include "mbed-client/lwm2m_storage.h"
+
 #include "device-management-client/lwm2m_registry_handler.h"
 #include "device-management-client/dmc_connect_api.h"
 #include "device-management-client/dmc_update_api.h"
 #include "eventOS_event.h"
 #include "platform/reboot.h"
+
+// the device object's value query functions are platform specific and are provided by the platform's setup.h
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_6 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_7 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_8 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_9 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_13 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_18 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_20
+#include "setup.h"
+#endif
 
 #include <stdio.h>
 #include <assert.h>
@@ -45,7 +53,6 @@
 #include "update-client-hub/update_client_hub.h"
 #include "update-client-lwm2m/lwm2m-source.h"
 #include "update-client-lwm2m/update_lwm2m_monitor.h"
-#include "UpdateClientResources.h"
 
 /* To be removed once update storage is defined in user config file.
    Default to filesystem in the meantime.
@@ -104,19 +111,62 @@ static const char *manufacturer_res_id = "/3/0/0";
 static const char *model_number_res_id = "/3/0/1";
 static const char *serial_number_res_id = "/3/0/2";
 static const char *reboot_res_id = "/3/0/4";
+
+// the optional resource paths need to be behind ifdef to avoid warnings on them
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_6
+static const char *available_power_sources_res_id = "/3/0/6/0";
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_7
+static const char *power_source_voltage_res_id = "/3/0/7/0";
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_8
+static const char *power_source_current_res_id = "/3/0/8/0";
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_9
+static const char *battery_level_res_id = "/3/0/9";
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_13
+static const char *current_time_res_id = "/3/0/13";
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_18
+static const char *hardware_version_res_id = "/3/0/18";
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_20
+static const char *battery_status_res_id = "/3/0/20";
+#endif
+
 static const char *error_code_res_id = "/3/0/11";
 static const char *supported_binding_res_id = "/3/0/16";
 #endif
 
-static int8_t               internal_event_handler_id;
+static int8_t               internal_event_handler_id = -1;
 static int8_t               app_event_handler_id;
+
+#if MBED_CLOUD_CLIENT_DYNAMIC_INTERFACE_ALLOC
+// On this version, the interface instance is allocated from pdmc_connect_init and
+// freed from pdmc_connect_deinit. This is useful on saving memory if the pdmc is not
+// used all the time so one can reduce the peak memory usage by freeing it.
+static lwm2m_interface_t*   interface;
+#else
+// This is the default, where interface is available and its setup can't fail for OOM.
 static lwm2m_interface_t    interface;
+#endif
+
 static arm_event_storage_t  user_allocated_event;
 static bool                 event_in_flight;
 
 static void pdmc_connect_event_handler(arm_event_s *event);
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static void print_registry_status_code(registry_status_t status);
+static int pdmc_connect_set_observable_and_callback(registry_t *registry, const registry_path_t *path,
+                                            bool auto_observable, registry_callback_t callback);
+
 #endif
 static void send_event(uint8_t event_type);
 static void forward_event_to_external_interface(arm_event_t *orig_event);
@@ -133,15 +183,31 @@ static registry_status_t reboot_callback(registry_callback_type_t type,
 #endif
                                          );
 
+static endpoint_t *pdmc_connect_get_endpoint(void);
+
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+static registry_t *pdmc_connect_get_registry(void);
+#endif
+
+static bool interface_is_initialized(void);
+
 /**
 * \brief initialises update
 */
-void pdmc_connect_init_update(void);
+static void pdmc_connect_init_update(void);
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 /**
 * \brief setups default device objects
 */
-void simple_m2m_create_device_object(void);
+static void simple_m2m_create_device_object(void);
+
+/**
+* \brief Add the optional minimal set of resources to device object.
+*/
+static void simple_m2m_create_optional_default_objects(void);
+#endif
+
 
 static void pdmc_connect_event_handler(arm_event_t *event)
 {
@@ -179,29 +245,29 @@ static void pdmc_connect_event_handler(arm_event_t *event)
 
         case APPLICATION_EVENT_START_BOOTSTRAP:
              tr_debug("application_event_handler() APPLICATION_EVENT_START_BOOTSTRAP");
-            lwm2m_interface_bootstrap(&interface);
+            lwm2m_interface_bootstrap(pdmc_connect_get_interface());
             break;
         case APPLICATION_EVENT_UNREGISTER:
-            lwm2m_interface_unregister_object(&interface);
+            lwm2m_interface_unregister_object(pdmc_connect_get_interface());
             break;
         case APPLICATION_EVENT_REGISTRATION_UPDATE:
-            endpoint_update_registration(&interface.endpoint);
+            endpoint_update_registration(pdmc_connect_get_endpoint());
             break;
         case APPLICATION_EVENT_REGISTER:
-            lwm2m_interface_register_object(&interface, 0);
+            lwm2m_interface_register_object(pdmc_connect_get_interface(), 0);
             break;
         case APPLICATION_EVENT_PAUSE:
 #ifdef MBED_CONF_CLOUD_CLIENT_USE_SOFT_PAUSE_RESUME
             // The "soft pause" will not cause teardown of mbedtls layer, which allows one
             // to just perform a socket re-establishment and continue using the DTLS session
             // as-is, without the heavy handshake process.
-            lwm2m_interface_pause(&interface);
+            lwm2m_interface_pause(pdmc_connect_get_interface());
 #else
-            lwm2m_interface_stop(&interface);
+            lwm2m_interface_stop(pdmc_connect_get_interface());
 #endif
             break;
         case APPLICATION_EVENT_RESUME:
-            lwm2m_interface_resume(&interface);
+            lwm2m_interface_resume(pdmc_connect_get_interface());
             break;
 
 #ifdef MBED_CLOUD_CLIENT_SUPPORT_UPDATE
@@ -223,7 +289,7 @@ static void print_registry_status_code(registry_status_t status)
     if (status != REGISTRY_STATUS_OK) {
         switch (status) {
             case REGISTRY_STATUS_NO_DATA:
-                status_str = "There is no date to be read";
+                status_str = "There is no data to be read";
                 break;
             case REGISTRY_STATUS_OK:
                 status_str = "No errors";
@@ -250,12 +316,14 @@ static void print_registry_status_code(registry_status_t status)
 }
 #endif
 
-void simple_m2m_create_optional_default_objects(void)
-{
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+static void simple_m2m_create_optional_default_objects(void)
+{
     registry_status_t ret;
     registry_path_t path;
-    registry_t *registry = &interface.endpoint.registry;
+    registry_t *registry = pdmc_connect_get_registry();
+
+    assert(registry);
 
     // Manufacturer  // problematic if these are set here as easy setting set by app get overwritten
     pdmc_connect_add_cloud_resource(registry, &path, 3, 0, 0, true, NULL);
@@ -277,13 +345,126 @@ void simple_m2m_create_optional_default_objects(void)
     print_registry_status_code(ret);
     ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
     print_registry_status_code(ret);
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_6 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_7 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_8 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_9 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_13 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_18 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_20
+
+    int32_t value;
+    const char* value_str;
+    bool value_available;
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_6
+    value_available = get_resource_device_available_power_sources(&value);
+    assert(value_available);
+
+    // XXX: this sets 3/0/6/0, although there should be multiple instances, one for each power source
+    ret = pdmc_connect_add_cloud_resource_instance(registry, &path, 3, 0, 6, 0, true, NULL);
+    print_registry_status_code(ret);
+
+    ret = registry_set_value_int(registry, &path, value);
+    print_registry_status_code(ret);
+
+    ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
+    print_registry_status_code(ret);
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_7
+    value_available = get_resource_device_power_source_voltage(&value);
+    assert(value_available);
+
+    // XXX: this sets 3/0/7/0, although there should be multiple instances, one for each power source
+    ret = pdmc_connect_add_cloud_resource_instance(registry, &path, 3, 0, 7, 0, true, NULL);
+    print_registry_status_code(ret);
+
+    ret = registry_set_value_int(registry, &path, value);
+    print_registry_status_code(ret);
+
+    ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
+    print_registry_status_code(ret);
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_8
+    value_available = get_resource_device_power_source_current(&value);
+    assert(value_available);
+
+    // XXX: this sets 3/0/8/0, although there should be multiple instances, one for each power source
+    ret = pdmc_connect_add_cloud_resource_instance(registry, &path, 3, 0, 8, 0, true, NULL);
+    print_registry_status_code(ret);
+
+    ret = registry_set_value_int(registry, &path, value);
+    print_registry_status_code(ret);
+
+    ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
+    print_registry_status_code(ret);
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_9
+    value_available = get_resource_device_battery_level(&value);
+    assert(value_available);
+
+    ret = pdmc_connect_add_cloud_resource(registry, &path, 3, 0, 9, true, NULL);
+    print_registry_status_code(ret);
+
+    ret = registry_set_value_int(registry, &path, value);
+    print_registry_status_code(ret);
+
+    ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
+    print_registry_status_code(ret);
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_13
+    value_available = get_resource_device_current_time(&value);
+    assert(value_available);
+
+    ret = pdmc_connect_add_cloud_resource(registry, &path, 3, 0, 13, true, NULL);
+    print_registry_status_code(ret);
+
+    ret = registry_set_value_int(registry, &path, value);
+    print_registry_status_code(ret);
+
+    ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
+    print_registry_status_code(ret);
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_18
+    value_available = get_resource_device_hardware_version(&value_str);
+    assert(value_available);
+
+    ret = pdmc_connect_add_cloud_resource(registry, &path, 3, 0, 18, true, NULL);
+    print_registry_status_code(ret);
+
+    ret = registry_set_value_string(registry, &path, value_str, strlen(value_str));
+    print_registry_status_code(ret);
+
+    ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
+    print_registry_status_code(ret);
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_20
+    value_available = get_resource_device_battery_status(&value);
+    assert(value_available);
+
+    ret = pdmc_connect_add_cloud_resource(registry, &path, 3, 0, 20, true, NULL);
+    print_registry_status_code(ret);
+
+    ret = registry_set_value_int(registry, &path, value);
+    print_registry_status_code(ret);
+
+    ret = registry_set_resource_value_to_reg_msg(registry, &path, true);
+    print_registry_status_code(ret);
 #endif
 }
+#endif
 
 #ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static int get_device_object_resources(endpoint_t *endpoint, register_resource_t **res)
 {
     register_resource_t *curr;
+
+    // todo: make these all optional, so they can be turned off individually based on customer requirements on functionality and/or HW resources available
 
     // manufacturer
     curr = endpoint_create_register_resource_str(endpoint, manufacturer_res_id, true,
@@ -309,31 +490,126 @@ static int get_device_object_resources(endpoint_t *endpoint, register_resource_t
         return -1;
     }
 
-    // reboot
+    // reboot (3/0/4)
     curr->next = endpoint_create_register_resource(endpoint, reboot_res_id, false);
     curr = curr->next;
     if (!curr) {
         return -1;
     }
 
-    // error code
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_6 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_7 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_8 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_9 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_13 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_18 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_20
+
+    int32_t value;
+    const char* value_str;
+    bool value_available;
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_6
+    // available power sources (3/0/6/0)
+    value_available = get_resource_device_available_power_sources(&value);
+    assert(value_available);
+
+    curr->next = endpoint_create_register_resource_int(endpoint, available_power_sources_res_id, false, value);
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_7
+    // power source voltage (3/0/7/0)
+    value_available = get_resource_device_power_source_voltage(&value);
+    assert(value_available);
+
+    curr->next = endpoint_create_register_resource_int(endpoint, power_source_voltage_res_id, false, value);
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_8
+    // power source current (3/0/8/0)
+    value_available = get_resource_device_power_source_current(&value);
+    assert(value_available);
+
+    curr->next = endpoint_create_register_resource_int(endpoint, power_source_current_res_id, false, value);
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_9
+    // battery level (3/0/9)
+    value_available = get_resource_device_battery_level(&value);
+    assert(value_available);
+
+    curr->next = endpoint_create_register_resource_int(endpoint, battery_level_res_id, false, value);
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+#endif
+
+    // error code  (3/0/11)
     curr->next = endpoint_create_register_resource_int(endpoint, error_code_res_id, false, 0);
     curr = curr->next;
     if (!curr) {
         return -1;
     }
 
-    // supported bindings
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_13
+    // current time (3/0/13)
+    value_available = get_resource_device_current_time(&value);
+    assert(value_available);
+
+    curr->next = endpoint_create_register_resource_int(endpoint, current_time_res_id, false, value);
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+#endif
+
+    // supported bindings (3/0/16
     curr->next = endpoint_create_register_resource(endpoint, supported_binding_res_id, false);
     curr = curr->next;
     if (!curr) {
         return -1;
     }
 
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_18
+    // hardware wersion (3/0/18)
+    value_available = get_resource_device_hardware_version(&value_str);
+    assert(value_available);
+
+    curr->next = endpoint_create_register_resource_str(endpoint, hardware_version_res_id, false,
+                                                        value_str, strlen(value_str));
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+#endif
+
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_20
+    // battery status (3/0/20)
+    value_available = get_resource_device_battery_status(&value);
+    assert(value_available);
+
+    curr->next = endpoint_create_register_resource_int(endpoint, battery_status_res_id, false, value);
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+#endif
+
     return 0;
 }
 
-static sn_coap_hdr_s *on_coap_request(const registry_path_t* path,
+static sn_coap_hdr_s *on_device_object_coap_request(const registry_path_t* path,
                                       endpoint_t *endpoint,
                                       const sn_coap_hdr_s *request,
                                       sn_nsdl_addr_s *address,
@@ -341,13 +617,11 @@ static sn_coap_hdr_s *on_coap_request(const registry_path_t* path,
                                       int *acked)
 {
 
-    tr_debug("dmc_connect_api - on_coap_request()");
+    tr_debug("dmc_connect_api - on_device_object_coap_request()");
 
-    if (0 != memcmp("3/0/4", (char*)request->uri_path_ptr, request->uri_path_len)) {
-        response->msg_code = COAP_MSG_CODE_RESPONSE_NOT_FOUND;
-    } else {
-        tr_debug("dmc_connect_api on_coap_request() - response code: %d", response->msg_code);
-        response->msg_code = COAP_MSG_CODE_EMPTY;
+    if (memcmp("3/0/4", (char*)request->uri_path_ptr, request->uri_path_len) == 0) {
+        tr_debug("on_device_object_coap_request() - response code: %d", response->msg_code);
+
         registry_callback_t callback = endpoint_get_object_callback(endpoint, 3);
         if (callback) {
             if (send_callback_data(path, request, REGISTRY_CALLBACK_EXECUTE)) {
@@ -361,18 +635,22 @@ static sn_coap_hdr_s *on_coap_request(const registry_path_t* path,
         } else {
             response->msg_code = COAP_MSG_CODE_RESPONSE_NOT_FOUND;
         }
+    } else {
+        response->msg_code = COAP_MSG_CODE_RESPONSE_NOT_FOUND;
     }
 
     return response;
 }
 #endif
 
-void simple_m2m_create_device_object(void)
-{
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+static void simple_m2m_create_device_object(void)
+{
     registry_status_t ret;
     registry_path_t path;
-    registry_t *registry = &interface.endpoint.registry;
+    registry_t *registry = pdmc_connect_get_registry();
+
+    assert(registry);
 
     // Reboot
     pdmc_connect_add_cloud_resource(registry, &path, M2M_DEVICE_ID, 0, DEVICE_REBOOT, true, reboot_callback);  // created by default by default by cpp device class
@@ -392,8 +670,8 @@ void simple_m2m_create_device_object(void)
     pdmc_connect_add_cloud_resource(registry, &path, M2M_DEVICE_ID, 0, DEVICE_SUPPORTED_BINDING_MODE, true, NULL);    // created by default by default by cpp device class
     ret = registry_set_value_string(registry, &path, (char *)BINDING_MODE_UDP, false);
     print_registry_status_code(ret);
-#endif
 }
+#endif
 
 // todo this should likely be in application side.
 static registry_status_t reboot_callback(registry_callback_type_t type,
@@ -441,6 +719,8 @@ static oma_lwm2m_binding_and_mode_t get_binding_mode(void)
 
 static void send_event(uint8_t event_type)
 {
+    assert(interface_is_initialized());
+
     if (event_in_flight) {
         tr_info("send_event - event already in queue");
         return;
@@ -466,8 +746,48 @@ static void forward_event_to_external_interface(arm_event_t *orig_event)
 
 lwm2m_interface_t *pdmc_connect_get_interface(void)
 {
+#if MBED_CLOUD_CLIENT_DYNAMIC_INTERFACE_ALLOC
+
+    // Existing users do assume to get the pointer always, so we better make it sure
+    // it is there. Basically this variant requires one to make sure the pdmc_connect_init()
+    // is called before the code using interface
+    assert(interface);
+
+    return interface;
+#else
     return &interface;
+#endif
 }
+
+static endpoint_t *pdmc_connect_get_endpoint(void)
+{
+    lwm2m_interface_t *interface = pdmc_connect_get_interface();
+    if (!interface) {
+        return NULL;
+    }
+    return &interface->endpoint;
+}
+
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+static registry_t *pdmc_connect_get_registry(void)
+{
+    endpoint_t *endpoint = pdmc_connect_get_endpoint();
+    if (!endpoint) {
+        return NULL;
+    }
+    return &endpoint->registry;
+}
+#endif
+
+static bool interface_is_initialized(void)
+{
+#if MBED_CLOUD_CLIENT_DYNAMIC_INTERFACE_ALLOC
+    return (interface && (internal_event_handler_id != -1));
+#else
+    return (internal_event_handler_id != -1);
+#endif
+}
+
 
 void pdmc_connect_init(uint8_t event_handler_id)
 {
@@ -477,18 +797,44 @@ void pdmc_connect_init(uint8_t event_handler_id)
 
     event_in_flight = false;
 
-    internal_event_handler_id = eventOS_event_handler_create(pdmc_connect_event_handler,
-                                                             PDMC_CONNECT_STARTUP_EVENT_TYPE);
-    if (internal_event_handler_id < 0) {
-        tr_error("pdmc_connect_init - failed to create event handler\n");
+#if MBED_CLOUD_CLIENT_DYNAMIC_INTERFACE_ALLOC
+    // init may not be called multiple times without a call to pdmc_connect_deinit
+    assert(interface == NULL);
+    interface = lwm2m_alloc(sizeof(lwm2m_interface_t));
+
+    tr_info("allocated lwm2m_interface_t");
+    assert(interface != NULL);
+    if (interface == NULL) {
+        tr_error("interface alloc failed");
+        // XXX: having this function as void is silly, as it really can fail at least on development
+        // phase, so a return value would help the poor developer.
         return;
+    }
+
+    // Since interface is now dynamically allocated it needs to be explicitly zero-initialized
+    memset(interface, 0, sizeof(lwm2m_interface_t));
+#endif
+
+    if (internal_event_handler_id < 0) {
+        // since tasklets can't be removed the event handler can only be initialized once
+        internal_event_handler_id = eventOS_event_handler_create(pdmc_connect_event_handler,
+                                                                PDMC_CONNECT_STARTUP_EVENT_TYPE);
+        if (internal_event_handler_id < 0) {
+#if MBED_CLOUD_CLIENT_DYNAMIC_INTERFACE_ALLOC
+            free(interface);
+            interface = NULL;
+#endif
+            tr_error("pdmc_connect_init - failed to create event handler");
+            assert(false);
+            return;
+        }
     }
 
     app_event_handler_id = event_handler_id;
 
-    lwm2m_interface_init(&interface, 0, get_binding_mode(), LWM2M_INTERFACE_NETWORK_STACK_UNINITIALIZED /*this parameter is not used*/);
+    lwm2m_interface_init(pdmc_connect_get_interface(), 0, get_binding_mode(), LWM2M_INTERFACE_NETWORK_STACK_UNINITIALIZED /*this parameter is not used*/);
 
-    bool result = lwm2m_interface_setup(&interface, internal_event_handler_id, &interface,
+    bool result = lwm2m_interface_setup(pdmc_connect_get_interface(), internal_event_handler_id, pdmc_connect_get_interface(),
                                         MBED_CLOUD_CLIENT_ENDPOINT_TYPE, MBED_CLOUD_CLIENT_LIFETIME, NULL);
     assert(result);
     (void) result;
@@ -507,28 +853,45 @@ void pdmc_connect_init(uint8_t event_handler_id)
     simple_m2m_create_device_object();  // moved to end of setup so that these can be changed by app
     simple_m2m_create_optional_default_objects();  // init manufactor modelnumber and serial
 #else
-    object_handler_t *handler = endpoint_allocate_object_handler(M2M_DEVICE_ID, get_device_object_resources, on_coap_request, reboot_callback);
+    object_handler_t *handler = endpoint_allocate_object_handler(M2M_DEVICE_ID, get_device_object_resources, on_device_object_coap_request, reboot_callback);
     if (!handler) {
         tr_error("pdmc_connect_init() failed to allocate object handler");
         assert(handler); // if this happens it's a fatal error
         return;
     }
-    endpoint_register_object_handler(&(pdmc_connect_get_interface()->endpoint), handler);
+    endpoint_register_object_handler(pdmc_connect_get_endpoint(), handler);
 #endif
 }
 
 void pdmc_connect_deinit(void)
 {
+#if MBED_CLOUD_CLIENT_DYNAMIC_INTERFACE_ALLOC
+    // The free/close is usually allowed for a null instance too,
+    // as it eases the caller side error and cleanup handling significantly.
+    if (interface == NULL) {
+        return;
+    }
+#endif
+
 #ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
-    endpoint_remove_object_handler(&(pdmc_connect_get_interface()->endpoint), M2M_DEVICE_ID);
+    // The interface is being destroyed so remove all object handlers.
+    // They will need to be reallocated and registered on reinitialization.
+    endpoint_deallocate_object_handlers(pdmc_connect_get_endpoint());
 #endif
     eventOS_cancel(&user_allocated_event);
-    lwm2m_interface_clean(&interface);
+    lwm2m_interface_clean(pdmc_connect_get_interface());
+
+#if MBED_CLOUD_CLIENT_DYNAMIC_INTERFACE_ALLOC
+    lwm2m_free(interface);
+    interface = NULL; // prepare for a re-init
+#endif
 }
 
 void pdmc_connect_register(void *iface)
 {
-    lwm2m_interface_set_platform_network_handler(&interface, iface);
+    assert(interface_is_initialized());
+
+    lwm2m_interface_set_platform_network_handler(pdmc_connect_get_interface(), iface);
 
     if (storage_registration_credentials_available()) {
         pdmc_connect_init_update();
@@ -537,7 +900,7 @@ void pdmc_connect_register(void *iface)
     }
 }
 
-void pdmc_connect_init_update(void)
+static void pdmc_connect_init_update(void)
 {
     send_event(APPLICATION_EVENT_HANDLER_UPDATE_INIT);
 }
@@ -559,7 +922,8 @@ void pdmc_connect_pause(void)
 
 void pdmc_connect_resume(void *iface)
 {
-    lwm2m_interface_set_platform_network_handler(&interface, iface);
+    assert(interface_is_initialized());
+    lwm2m_interface_set_platform_network_handler(pdmc_connect_get_interface(), iface);
     send_event(APPLICATION_EVENT_RESUME);
 }
 
@@ -568,9 +932,26 @@ int pdmc_connect_add_cloud_resource(registry_t *registry, registry_path_t *path,
                                     const uint16_t object, const uint16_t object_instance, const uint16_t resource,
                                     bool auto_observable, registry_callback_t callback)
 {
-    registry_status_t ret;
-
     registry_set_path(path, object, object_instance, resource, 0, REGISTRY_PATH_RESOURCE);
+
+    return pdmc_connect_set_observable_and_callback(registry, path, auto_observable, callback);
+}
+
+int pdmc_connect_add_cloud_resource_instance(registry_t *registry, registry_path_t *path,
+                                    const uint16_t object, const uint16_t object_instance, const uint16_t resource,
+                                    const uint16_t resource_instance,
+                                    bool auto_observable, registry_callback_t callback)
+{
+    registry_set_path(path, object, object_instance, resource, resource_instance, REGISTRY_PATH_RESOURCE_INSTANCE);
+
+    return pdmc_connect_set_observable_and_callback(registry, path, auto_observable, callback);
+}
+
+
+static int pdmc_connect_set_observable_and_callback(registry_t *registry, const registry_path_t *path,
+                                            bool auto_observable, registry_callback_t callback)
+{
+    registry_status_t ret;
 
     ret = registry_set_auto_observable_parameter(registry, path, auto_observable);
 
@@ -579,6 +960,7 @@ int pdmc_connect_add_cloud_resource(registry_t *registry, registry_path_t *path,
         print_registry_status_code(ret);
     }
 
+    // Ugh, why not pass the real status code upwards instead of dumbing it down?
     return (ret == REGISTRY_STATUS_OK);
 }
 #endif
@@ -656,7 +1038,7 @@ static void update_client_initialization(void)
 
     // Init FOTA if it's enabled
 
-    ARM_UCS_LWM2M_SOURCE_endpoint_set(&interface.endpoint);
+    ARM_UCS_LWM2M_SOURCE_endpoint_set(pdmc_connect_get_interface().endpoint);
 
     /* Register sources */
     static const ARM_UPDATE_SOURCE* sources[1];
@@ -719,10 +1101,8 @@ static bool schedule_update_event(arm_event_storage_t *ev, void *cb, uintptr_t p
 static void fota_update_init(void)
 {
     // Init FOTA if it's enabled
-    int fota_status = fota_init(&interface.endpoint);
+    int fota_status = fota_init(pdmc_connect_get_endpoint(), NULL);
     assert(!fota_status);
     (void) fota_status;
 }
 #endif
-
-#endif // MBED_CONF_MBED_CLIENT_ENABLE_CPP_API

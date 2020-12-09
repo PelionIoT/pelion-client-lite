@@ -1,8 +1,14 @@
 ## Changelog for Pelion Device Management Client Lite
 
-### Release 1.2.1-lite (26.08.2020)
+### Release 1.3.0-lite (07.12.2020)
 
-Fixed handling of partially written (due to power-cut) flash pages while installing the FW candidate.
+* Fixed the `COAP_MSG_CODE_RESPONSE_BAD_REQUEST` and `COAP_MSG_CODE_RESPONSE_FORBIDDEN` responses. Now client re-bootstraps when the server rejects registration.
+* Fixed a memory leak that occurred because Device Management Client Lite did not release memory when the connection was closed.
+* Fixed several related to Firmware-Over-the-Air (FOTA) updates.
+
+### Release 1.2.1-lite (24.08.2020)
+
+* Fixed handling of partially written (due to power-cut) flash pages while installing the FW candidate.
 
 ### Release 1.2.0-lite (17.08.2020)
 
@@ -11,7 +17,7 @@ Fixed handling of partially written (due to power-cut) flash pages while install
 
 ### Release 1.1.1-lite (05.06.2020)
 
-Client Lite 1.1.0 sends an additional component update object (/14) as part of its registration message even though the client does not support it yet. The update service has changed recently to handle the client differently, so there is no backward compatibility. Client Lite 1.1.0 cannot successfully update firmware. As part of this patch release, component update is behind a feature flag that is disabled in Client Lite release.
+* Client Lite 1.1.0 sends an additional component update object (/14) as part of its registration message even though the client does not support it yet. The update service has changed recently to handle the client differently, so there is no backward compatibility. Client Lite 1.1.0 cannot successfully update firmware. As part of this patch release, component update is behind a feature flag that is disabled in Client Lite release.
 
 ### Release 1.1.0-lite (20.05.2020)
 
@@ -23,5 +29,5 @@ Client Lite 1.1.0 sends an additional component update object (/14) as part of i
 
 ### Release 1.0.0-lite (31.01.2020)
 
-Initial alpha release for public preview. Not suitable for production use.
+* Initial alpha release for public preview. Not suitable for production use.
 

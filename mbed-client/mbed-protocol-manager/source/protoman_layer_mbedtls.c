@@ -741,8 +741,8 @@ static int _do_write(struct protoman_layer_s *layer)
     }
 
     retval = mbedtls_ssl_write(&layer_mbedtls_common->ssl, layer->tx_buf + layer->tx_offset, layer->tx_len - layer->tx_offset);
-    if (retval < 0) {
-        protoman_warn("mbedtls_ssl_write() returned %s (%d)", protoman_strmbedtls(retval), retval);
+    if (retval < 0 && retval != MBEDTLS_ERR_SSL_WANT_READ && retval != MBEDTLS_ERR_SSL_WANT_WRITE) {
+        protoman_warn("mbedtls_ssl_write() returned %s (%X)", protoman_strmbedtls(retval), retval);
     }
 
     /* Capture master secret for TLS decryption in Wireshark */
@@ -836,7 +836,7 @@ static int _do_read(struct protoman_layer_s *layer)
                 protoman_layer_record_error(layer, PROTOMAN_ERR_CONNECTION_CLOSED, retval, "EOF");
                 state_retval = PROTOMAN_STATE_RETVAL_ERROR;
             }
-            protoman_info("mbedtls_ssl_read() returned %s (%d)", protoman_strmbedtls(retval), retval);
+            protoman_info("mbedtls_ssl_read() returned %s (%X)", protoman_strmbedtls(retval), retval);
             goto cleanup;
 
         default:
@@ -854,7 +854,7 @@ static int _do_read(struct protoman_layer_s *layer)
             goto exit;
     }
 print_as_error:
-    protoman_err("mbedtls_ssl_read() returned %s (%d)", protoman_strmbedtls(retval), retval);
+    protoman_err("mbedtls_ssl_read() returned %s (%X)", protoman_strmbedtls(retval), retval);
 cleanup:
     PROTOMAN_DEBUG_PRINT_FREE(layer->name, layer->rx_buf);
     protoman_rx_free(protoman, layer->rx_buf);
@@ -887,7 +887,7 @@ static int _do_disconnect(struct protoman_layer_s *layer)
                 return PROTOMAN_STATE_RETVAL_WAIT; /* stay in disconnectin state and try again */
 
             default:
-                protoman_warn("mbedtls_ssl_close_notify() failed with %d", retval);
+                protoman_warn("mbedtls_ssl_close_notify() failed with %X", retval);
         }
     }
 
@@ -901,7 +901,7 @@ static int _do_disconnect(struct protoman_layer_s *layer)
 
         case MBEDTLS_ERR_SSL_ALLOC_FAILED:
         default:
-            protoman_err("mbedtls_ssl_session_reset(), failed with %s (%d)", protoman_strmbedtls(retval), retval);
+            protoman_err("mbedtls_ssl_session_reset(), failed with %s (%X)", protoman_strmbedtls(retval), retval);
             protoman_layer_record_error(layer, PROTOMAN_ERR_NOMEM, retval, protoman_strmbedtls(retval));
             return PROTOMAN_STATE_RETVAL_ERROR;
     }

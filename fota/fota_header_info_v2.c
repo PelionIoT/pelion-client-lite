@@ -24,7 +24,6 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include <inttypes.h>
 
 #if (MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION == 2)
 

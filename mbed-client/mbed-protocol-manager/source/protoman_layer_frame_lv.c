@@ -381,7 +381,7 @@ static int _do_read(struct protoman_layer_s *layer)
             /* Header read succesfully */
             layer_frame_lv->state = PROTOMAN_FRAME_LV_DATA;
             /* No break; => continue to reading data */
-
+            /* FALLTHROUGH */
         case PROTOMAN_FRAME_LV_DATA:
             retval = _do_read_data(layer);
             if (PROTOMAN_STATE_RETVAL_FINISHED != retval) {

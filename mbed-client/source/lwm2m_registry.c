@@ -663,21 +663,6 @@ static registry_status_t registry_add_object(registry_t *registry, const registr
             }
             sll_add(*list, current_object);
             send_events(registry, path, REGISTRY_EVENT_LISTEN_CREATE_REMOVE);
-
-#ifdef MBED_CONF_MBED_CLIENT_ENABLE_CPP_API
-            // XXX: this notification via callback is only needed when the C++ API is in use
-            registry_callback_t callback;
-            registry_path_t parent_path = *path;
-
-            if (path->path_type > REGISTRY_PATH_OBJECT) {
-
-                parent_path.path_type--;
-
-                if (registry_get_callback(registry, &parent_path, &callback) == REGISTRY_STATUS_OK) {
-                    callback(REGISTRY_CALLBACK_ITEM_ADDED, path, NULL, NULL, NOTIFICATION_STATUS_IGNORE, registry);
-                }
-            }
-#endif
         }
 
         if(current_path.path_type == path->path_type) {

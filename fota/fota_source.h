@@ -21,6 +21,8 @@
 
 #include "fota/fota_base.h"
 
+#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -42,7 +44,7 @@ typedef struct endpoint_s endpoint_t;
 void fota_source_set_config(size_t max_frag_size, bool allow_unaligned_fragments);
 
 int fota_source_init(
-    endpoint_t *in_endpoint,
+    void *m2m_interface, void *resource_list,
     const uint8_t *vendor_id, uint32_t vendor_id_size,
     const uint8_t *class_id, uint32_t class_id_size,
     const uint8_t *curr_fw_digest, uint32_t curr_fw_digest_size,
@@ -52,7 +54,7 @@ int fota_source_init(
 int fota_source_add_component(unsigned int comp_id, const char *name, const char *sem_ver);
 
 int fota_source_deinit(void);
-int fota_source_firmware_request_fragment(const char *uri, uint32_t offset);
+int fota_source_firmware_request_fragment(const char *uri, size_t offset);
 
 typedef void (*report_sent_callback_t)(void);
 int fota_source_report_state(fota_source_state_e state, report_sent_callback_t on_sent, report_sent_callback_t on_failure);
@@ -62,5 +64,7 @@ void fota_source_send_manifest_received_ack(void);
 #ifdef __cplusplus
 }
 #endif
+
+#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
 
 #endif // __FOTA_SOURCE_H_

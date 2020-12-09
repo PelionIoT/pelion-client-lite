@@ -14,32 +14,36 @@
  * limitations under the License.
  */
 
-#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 
-#include "lwm2m_constants.h"
 #include "lwm2m_endpoint.h"
-#include "lwm2m_heap.h"
 #include "lwm2m_notifier.h"
+#include "mbed-trace/mbed_trace.h"
+#include "sn_coap_protocol_internal.h"
+
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+#include "lwm2m_constants.h"
+#include "lwm2m_heap.h"
 #include "lwm2m_registry.h"
 #include "eventOS_event.h"
 #include "eventOS_event_timer.h"
 #include "lwm2m_registry_meta.h"
 #include "tlvserializer.h"
-#include "mbed-trace/mbed_trace.h"
-#include "sn_coap_protocol_internal.h"
 
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#endif
 
 #define TRACE_GROUP "Ntfr"
+
+#define NOTIFIER_UINT24_MAX 0xFFFFFF
+
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 
 #define NOTIFIER_EVENT_INIT 0
 #define NOTIFIER_EVENT_ID 20
 #define NOTIFIER_EVENT_TIMER 7
-
-#define NOTIFIER_UINT24_MAX 0xFFFFFF
 
 #ifndef NOTIFIER_DEFAULT_PMIN
 #define NOTIFIER_DEFAULT_PMIN 0
@@ -70,6 +74,8 @@ typedef struct notifier_observation_value_s {
 typedef void notifier_observation_value_t;
 #endif // MBED_CLIENT_ENABLE_OBSERVATION_PARAMETERS
 
+static int8_t notifier_event_handler_id =-1;
+
 static void notifier_value_changed(notifier_t *notifier);
 
 static void notifier_timer_expired(notifier_t *notifier);
@@ -79,6 +85,12 @@ static void notifier_notify_next(notifier_t *notifier, const registry_path_t *pa
 static uint32_t notifier_get_current_time(notifier_t *notifier);
 
 static void notifier_schedule_notification(notifier_t *notifier, uint32_t current_time, uint32_t time_to_notification);
+
+static bool notifier_send_observation_notification_with_path(endpoint_t *endpoint, const registry_path_t *path, uint8_t *token_ptr, uint8_t token_len,
+                                                      uint8_t *payload_ptr, uint16_t payload_len, sn_coap_content_format_e content_format);
+
+static int notifier_send_observation_notification(struct endpoint_s *endpoint, uint32_t max_age, uint8_t *token_ptr, uint8_t token_len,
+                                            uint8_t *payload_ptr, uint16_t payload_len, sn_coap_content_format_e content_format);
 
 static void notifier_event_handler(arm_event_t *event)
 {
@@ -111,7 +123,6 @@ void notifier_init(notifier_t *notifier, endpoint_t *endpoint)
 
     notifier->endpoint = endpoint;
 
-    notifier->event_handler_id = -1;
     notifier->current_time = 0;
     notifier->next_event_time = 0;
     notifier->last_ticks = 0;
@@ -129,14 +140,16 @@ bool notifier_setup(notifier_t *notifier)
 {
     bool success = false;
 
-    // XXX: this needs to be fixed to a singleton, as it will leak the tasklet
-    notifier->event_handler_id = eventOS_event_handler_create(&notifier_event_handler, NOTIFIER_EVENT_INIT); //TODO: Check error codes?
-
-    if (notifier->event_handler_id >= 0) {
-
-        if (registry_listen_events(&notifier->endpoint->registry, notifier, REGISTRY_EVENT_LISTEN_VALUE_CHANGES, notifier->event_handler_id) == REGISTRY_STATUS_OK) {
-            success = true;
+    if (notifier_event_handler_id < 0) {
+        notifier_event_handler_id = eventOS_event_handler_create(&notifier_event_handler, NOTIFIER_EVENT_INIT);
+        if (notifier_event_handler_id < 0) {
+            tr_error("notifier_setup() eventOS_event_handler_create failed!");
+            assert(0);
         }
+    }
+
+    if (registry_listen_events(&notifier->endpoint->registry, notifier, REGISTRY_EVENT_LISTEN_VALUE_CHANGES, notifier_event_handler_id) == REGISTRY_STATUS_OK) {
+        success = true;
     }
 
     return success;
@@ -145,16 +158,16 @@ bool notifier_setup(notifier_t *notifier)
 void notifier_stop(notifier_t *notifier)
 {
     notifier->running = false;
-    if (notifier->event_handler_id >= 0) {
-        eventOS_event_timer_cancel(NOTIFIER_EVENT_ID, notifier->event_handler_id);
+    if (notifier_event_handler_id >= 0) {
+        eventOS_event_timer_cancel(NOTIFIER_EVENT_ID, notifier_event_handler_id);
     }
-    registry_listen_events_stop(&notifier->endpoint->registry, notifier, REGISTRY_EVENT_LISTEN_VALUE_CHANGES, notifier->event_handler_id);
+    registry_listen_events_stop(&notifier->endpoint->registry, notifier, REGISTRY_EVENT_LISTEN_VALUE_CHANGES, notifier_event_handler_id);
 }
 
 void notifier_pause(notifier_t *notifier)
 {
     notifier->running = false;
-    eventOS_event_timer_cancel(NOTIFIER_EVENT_ID, notifier->event_handler_id);
+    eventOS_event_timer_cancel(NOTIFIER_EVENT_ID, notifier_event_handler_id);
 }
 
 void notifier_continue(notifier_t *notifier)
@@ -176,6 +189,8 @@ void notifier_continue(notifier_t *notifier)
     send_queue_request(notifier->endpoint, SEND_QUEUE_NOTIFIER);
 }
 
+#endif
+
 static uint32_t notifier_get_notify_option_number(notifier_t *notifier)
 {
 
@@ -187,6 +202,8 @@ static uint32_t notifier_get_notify_option_number(notifier_t *notifier)
 
     return notifier->notify_option_number;
 }
+
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 
 static uint32_t notifier_time_to_pmax(notifier_t *notifier, registry_observation_parameters_t *parameters, uint32_t current_time)
 {
@@ -429,7 +446,7 @@ static void notifier_schedule_notification(notifier_t *notifier, uint32_t curren
 {
     uint32_t time_ms;
     uint32_t notification_time = current_time + time_to_notification;
-    const arm_event_t event = {notifier->event_handler_id, notifier->event_handler_id, NOTIFIER_EVENT_TIMER,
+    const arm_event_t event = {notifier_event_handler_id, notifier_event_handler_id, NOTIFIER_EVENT_TIMER,
                                NOTIFIER_EVENT_ID, notifier, ARM_LIB_LOW_PRIORITY_EVENT, 0};
 
     if (NOTIFIER_TIME_INFINITE == time_to_notification || notifier->notifying) {
@@ -451,7 +468,7 @@ static void notifier_schedule_notification(notifier_t *notifier, uint32_t curren
 
         tr_debug("Scheduling notification in: %" PRIu32 " ms", time_ms);
 
-        eventOS_event_timer_cancel(NOTIFIER_EVENT_ID, notifier->event_handler_id);
+        eventOS_event_timer_cancel(NOTIFIER_EVENT_ID, notifier_event_handler_id);
         if (!eventOS_event_timer_request_in(&event, eventOS_event_timer_ms_to_ticks(time_ms))) {
             tr_error("schedule_notification timer_request failed");
             assert(0);
@@ -505,22 +522,22 @@ static uint8_t notifier_set_parameters(notifier_t *notifier, registry_observatio
 
 }
 
-static void notifier_callback(notifier_t *notifier, const registry_path_t *path, registry_notification_status_t status)
+static void notifier_callback(endpoint_t *endpoint, const registry_path_t *path, registry_notification_status_t status)
 {
 
     registry_callback_t callback;
 
-    if (registry_get_callback(&notifier->endpoint->registry, path, &callback) == REGISTRY_STATUS_OK) {
-        callback(REGISTRY_CALLBACK_NOTIFICATION_STATUS, path, NULL, NULL, status, &notifier->endpoint->registry);
+    if (registry_get_callback(&endpoint->registry, path, &callback) == REGISTRY_STATUS_OK) {
+        callback(REGISTRY_CALLBACK_NOTIFICATION_STATUS, path, NULL, NULL, status, &endpoint->registry);
     }
 
 }
 
-static bool notifier_send_observation_notification(endpoint_t *endpoint, const registry_path_t *path, uint8_t *token_ptr, uint8_t token_len,
+static bool notifier_send_observation_notification_with_path(endpoint_t *endpoint, const registry_path_t *path, uint8_t *token_ptr, uint8_t token_len,
                                                       uint8_t *payload_ptr, uint16_t payload_len, sn_coap_content_format_e content_format)
 {
-    sn_coap_hdr_s   *notification_message_ptr;
-    bool success = false;
+    int status;
+    uint32_t max_age;
 
     /* Check parameters */
     if (endpoint == NULL || endpoint->coap == NULL || endpoint->connection == NULL) {
@@ -529,28 +546,41 @@ static bool notifier_send_observation_notification(endpoint_t *endpoint, const r
         return false;
     }
 
+    /* Read max age from registry */
+    if (registry_get_max_age(&endpoint->registry, path, &max_age) == REGISTRY_STATUS_OK) {
+        status = notifier_send_observation_notification(endpoint, max_age, token_ptr, token_len, payload_ptr, payload_len, content_format);
+    } else {
+        tr_error("notifier_send_observation_notification() could not read max_age from registry!");
+        status = NOTIFICATION_STATUS_BUILD_ERROR;
+    }
+
+    notifier_callback(endpoint, path, status);
+
+    return (status == NOTIFICATION_STATUS_SENT);
+}
+
+#endif
+
+int notifier_send_observation_notification(struct endpoint_s *endpoint, uint32_t max_age, uint8_t *token_ptr, uint8_t token_len,
+                                            uint8_t *payload_ptr, uint16_t payload_len, sn_coap_content_format_e content_format)
+{
+    int ret_val;
+    int status = NOTIFICATION_STATUS_BUILD_ERROR;
+    sn_coap_hdr_s *notification_message_ptr = NULL;
+
     /* Allocate and initialize memory for header struct */
     notification_message_ptr = sn_coap_parser_alloc_message(endpoint->coap);
     if (notification_message_ptr == NULL) {
         tr_error("notifier_send_observation_notification alloc_message failed.");
-        notifier_callback(&endpoint->notifier, path, NOTIFICATION_STATUS_BUILD_ERROR);
-        return false;
+        goto exit_error;
     }
 
     if (sn_coap_parser_alloc_options(endpoint->coap, notification_message_ptr) == NULL) {
         tr_error("notifier_send_observation_notification alloc_options failed.");
-        lwm2m_free(notification_message_ptr);
-        notifier_callback(&endpoint->notifier, path, NOTIFICATION_STATUS_BUILD_ERROR);
-        return false;
+        goto exit_error;
     }
 
-    /* Read max age from registry */
-    if (registry_get_max_age(&endpoint->registry, path, &notification_message_ptr->options_list_ptr->max_age) != REGISTRY_STATUS_OK) {
-        tr_error("notifier_send_observation_notification() could not read max_age from registry!");
-        sn_coap_parser_release_allocated_coap_msg_mem(endpoint->coap, notification_message_ptr);
-        notifier_callback(&endpoint->notifier, path, NOTIFICATION_STATUS_BUILD_ERROR);
-        return false;
-    }
+    notification_message_ptr->options_list_ptr->max_age = max_age;
 
     /* Fill header */
     notification_message_ptr->msg_type = COAP_MSG_TYPE_CONFIRMABLE;
@@ -571,39 +601,38 @@ static bool notifier_send_observation_notification(endpoint_t *endpoint, const r
     notification_message_ptr->content_format = content_format;
 
     /* Send message */
-    int ret_val = endpoint_send_coap_message(endpoint, NULL, notification_message_ptr);
+    ret_val = endpoint_send_coap_message(endpoint, NULL, notification_message_ptr);
 
     if (ENDPOINT_STATUS_OK == ret_val) {
-
-        success = true;
-
         endpoint->notifier.message_id = notification_message_ptr->msg_id;
-
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
         if (payload_len > endpoint->coap->sn_coap_block_data_size) {
             endpoint->notifier.block_notify = true;
         } else {
             endpoint->notifier.block_notify = false;
         }
-
-        notifier_callback(&endpoint->notifier, path, NOTIFICATION_STATUS_SENT);
+#endif
+        status = NOTIFICATION_STATUS_SENT;
     } else if (ENDPOINT_STATUS_ERROR_MEMORY_FAILED == ret_val) {
         // Failed to allocate memory for building CoAP message.
-        notifier_callback(&endpoint->notifier, path, NOTIFICATION_STATUS_BUILD_ERROR);
+        status = NOTIFICATION_STATUS_BUILD_ERROR;
     } else {
         // Other transmission errors like Queue full.
-        notifier_callback(&endpoint->notifier, path, NOTIFICATION_STATUS_RESEND_QUEUE_FULL);
-
+        status = NOTIFICATION_STATUS_RESEND_QUEUE_FULL;
     }
 
     /* Clear pointers we do not want to free. */
     notification_message_ptr->payload_ptr = NULL;
     notification_message_ptr->token_ptr = NULL;
 
+exit_error:
     /* Free memory */
     sn_coap_parser_release_allocated_coap_msg_mem(endpoint->coap, notification_message_ptr);
 
-    return success;
+    return status;
 }
+
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 
 static bool notifier_send_notification(notifier_t *notifier, const registry_path_t *path, registry_observation_parameters_t *parameters, uint32_t current_time, registry_observation_value_t *value, bool dirty_only)
 {
@@ -657,7 +686,7 @@ static bool notifier_send_notification(notifier_t *notifier, const registry_path
     data = registry_serialize(&notifier->endpoint->registry, path, &len, serialization_format, (multiple && dirty_only), &serializer_status);
 
 
-    success = notifier_send_observation_notification(notifier->endpoint,
+    success = notifier_send_observation_notification_with_path(notifier->endpoint,
                                                     path,
                                                     parameters->token,
                                                     parameters->token_size,
@@ -677,7 +706,7 @@ static bool notifier_send_notification(notifier_t *notifier, const registry_path
         notifier->last_notified = *path;
         notifier->notifying = true;
 
-        eventOS_event_timer_cancel(NOTIFIER_EVENT_ID, notifier->event_handler_id);
+        eventOS_event_timer_cancel(NOTIFIER_EVENT_ID, notifier_event_handler_id);
         notifier->next_event_time = 0;
 
     } else {

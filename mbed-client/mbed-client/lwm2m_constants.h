@@ -33,7 +33,7 @@
 #define ONE_SECOND_TIMER 1
 #define MAX_ALLOWED_STRING_LENGTH 128
 #define MAX_ALLOWED_STRING_SIZE (MAX_ALLOWED_STRING_LENGTH + 1)
-#define MAX_ALLOWED_IP_STRING_LENGTH 64
+#define MAX_ALLOWED_IP_STRING_LENGTH 96
 #define OPTIMUM_LIFETIME 3600
 #define REDUCE_LIFETIME 900
 #define REDUCTION_FACTOR 0.75f
@@ -46,6 +46,12 @@
 #endif
 
 #define LIFETIME_LENGTH 11
+
+// -9223372036854775808 - +9223372036854775807
+// max length of int64_t string is 20 bytes + nil
+// These are used in serializing resource values
+#define REGISTRY_INT64_STRING_MAX_LEN 21
+#define REGISTRY_INT8_STRING_MAX_LEN 4
 
 // XXX:
 //                               <name></><inst-id></><res-name>

@@ -79,6 +79,11 @@ struct protoman_layer_mbedos_socket_s { /* Create me with new */
         memset(&layer, 0, sizeof(layer));
         memset(&config, 0, sizeof(config));
     }
+    ~protoman_layer_mbedos_socket_s(){
+        if(socket) {	
+            delete socket;
+        }
+    }
     struct protoman_layer_s layer; /* must be first element */
     struct protoman_config_mbedos_socket_s config;
     SocketAddress address;
@@ -483,8 +488,8 @@ static int _do_disconnect(struct protoman_layer_s *layer)
     Socket& socket = *layer_mbedos_socket->socket;
 
     protoman_verbose("");
-    socket.close(); /* NOTE: return value is ignored, next connection will fail if error happens here */
-
+    socket.close(); /* NOTE: return value is ignored, next connection will fail if error happens here */	
+    
     if (layer_mbedos_socket->async_dns_query > 0) {
         NetworkInterface& interface = *(NetworkInterface *)layer_mbedos_socket->config.interface;
         interface.gethostbyname_async_cancel(layer_mbedos_socket->async_dns_query);
@@ -511,7 +516,9 @@ static void layer_free(struct protoman_layer_s *layer)
         NetworkInterface& interface = *(NetworkInterface *)layer_mbedos_socket->config.interface;
         interface.gethostbyname_async_cancel(layer_mbedos_socket->async_dns_query);
     }
-
+    delete layer_mbedos_socket;	
+    layer_mbedos_socket = NULL;	
+    
 }
 
 static int _do_write(struct protoman_layer_s *layer)

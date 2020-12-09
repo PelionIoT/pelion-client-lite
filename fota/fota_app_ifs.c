@@ -30,33 +30,58 @@
 
 #include <inttypes.h>
 
+void fota_app_authorize_update()
+{
+    fota_event_handler_defer_with_result(fota_on_authorize, 0);
+}
+
 void fota_app_authorize(uint32_t token)
 {
-    fota_event_handler_defer_with_result(fota_on_authorize, token, 0);
+    (void) token;
+    fota_app_authorize_update();
+}
+
+void fota_app_reject_update(int32_t reason)
+{
+    fota_event_handler_defer_with_result(fota_on_reject, reason);
 }
 
 void fota_app_reject(uint32_t token, int32_t reason)
 {
-    fota_event_handler_defer_with_result(fota_on_reject, token, reason);
+    (void) token;
+    fota_app_reject_update(reason);
+}
+
+void fota_app_defer_update()
+{
+    fota_event_handler_defer_with_result(fota_on_defer, 0);
 }
 
 void fota_app_defer(uint32_t token)
 {
-    fota_event_handler_defer_with_result(fota_on_defer, token, 0);
+    (void) token;
+    fota_app_defer_update();
 }
 
 void fota_app_resume(void)
 {
-    fota_event_handler_defer_with_result(fota_on_resume, 0, 0);
+    fota_event_handler_defer_with_result_ignore_busy(fota_on_resume, 0);
 }
 
 #if FOTA_DEFAULT_APP_IFS
-void fota_app_on_download_progress(uint32_t downloaded_size, uint32_t current_chunk_size, uint32_t total_size)
+void fota_app_on_download_progress(size_t downloaded_size, size_t current_chunk_size, size_t total_size)
 {
     FOTA_ASSERT(total_size);
     static const uint32_t  print_range_percent = 5;
-    uint32_t progress = (downloaded_size + current_chunk_size) * 100 / total_size;
-    uint32_t prev_progress = downloaded_size * 100 / total_size;
+
+    total_size /= 100;
+    // In case total size is less then 100B return without printing progress
+    if (total_size == 0) {
+        return;
+    }
+
+    uint32_t progress = (downloaded_size + current_chunk_size) / total_size;
+    uint32_t prev_progress = downloaded_size / total_size;
 
     if (downloaded_size == 0 || ((progress / print_range_percent) > (prev_progress / print_range_percent))) {
         FOTA_APP_PRINT("Downloading firmware. %" PRIu32 "%c", progress, '%');
@@ -83,7 +108,8 @@ int fota_app_on_complete(int32_t status)
 */
 int fota_app_on_install_authorization(uint32_t token)
 {
-    fota_app_authorize(token);
+    (void) token; // unused;
+    fota_app_authorize_update();
     FOTA_APP_PRINT("Install authorization granted");
     return FOTA_STATUS_SUCCESS;
 }
@@ -104,6 +130,7 @@ int fota_app_on_download_authorization(
     fota_component_version_t curr_fw_version
 )
 {
+    (void) token; // unused;
     char curr_semver[FOTA_COMPONENT_MAX_SEMVER_STR_SIZE] = { 0 };
     char new_semver[FOTA_COMPONENT_MAX_SEMVER_STR_SIZE] = { 0 };
     fota_component_version_int_to_semver(curr_fw_version, curr_semver);
@@ -118,21 +145,21 @@ int fota_app_on_download_authorization(
 
     if (candidate_info->payload_format == FOTA_MANIFEST_PAYLOAD_FORMAT_DELTA) {
         FOTA_APP_PRINT(
-            "Delta update. Patch size %" PRIu32 "B full image size %" PRIu32 "B",
+            "Delta update. Patch size %zuB full image size %zuB",
             candidate_info->payload_size,
             candidate_info->installed_size
         );
     } else {
-        FOTA_APP_PRINT("Update size %" PRIu32 "B", candidate_info->payload_size);
+        FOTA_APP_PRINT("Update size %zuB", candidate_info->payload_size);
     }
     FOTA_APP_PRINT("---------------------------------------------------");
     FOTA_APP_PRINT("Download authorization granted");
-    fota_app_authorize(token);
+    fota_app_authorize_update();
     /* Application can reject an update in the following way
-        fota_app_reject(token, 127);
+        fota_app_reject_update(127);
         Reason error code will be logged.
        Alternatively application can defer the update by calling
-        fota_app_defer(token);
+        fota_app_defer_update();
        Deferred update will be restarted on next boot or by calling fota_app_resume() API.
 
     */

@@ -20,6 +20,9 @@
 #define __FOTA_COMPONENT_H_
 
 #include "fota/fota_base.h"
+
+#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+
 #include "fota/fota_component_defs.h"
 #include "fota/fota_crypto_defs.h"
 #include "fota/fota_candidate.h"
@@ -37,7 +40,7 @@ extern "C" {
  * \param[in] num_read actual size read.
  * \return FOTA_STATUS_SUCCESS for succesfull read.
  */
-typedef int (*fota_component_curr_fw_read)(uint8_t *buf, uint32_t offset, uint32_t size, uint32_t *num_read);
+typedef int (*fota_component_curr_fw_read)(uint8_t *buf, size_t offset, size_t size, size_t *num_read);
 
 /**
  * Callback to get current firmware digest, required only if delta supported.
@@ -58,7 +61,7 @@ typedef int (*fota_component_post_install_handler_t)(const char *new_sem_ver);
  * Component description info
  *
  * install_alignment If set to non-zero, fragment sizes returned to the user will be aligned to this value.
- * candidate_iterate_cb callback to candidate iterate firmware function.
+ * candidate_iterate_cb callback to candidate iterate firmware function. Note: for Linux systems this iterative callback is replaced by fota_app_on_install_candidate
  * support_delta if delta update supported for component.
  * component_post_install_cb callback to for post install component check.
  * curr_fw_read callback to read current firmware. Required only if delta is supported for current component, NULL otherwise.
@@ -67,12 +70,14 @@ typedef int (*fota_component_post_install_handler_t)(const char *new_sem_ver);
  */
 typedef struct {
     uint32_t install_alignment;
-    fota_candidate_iterate_handler_t candidate_iterate_cb;
-    fota_component_post_install_handler_t component_post_install_cb;
     bool support_delta;
+    bool need_reboot;
+#if !defined(TARGET_LIKE_LINUX)
+    fota_candidate_iterate_handler_t candidate_iterate_cb;
+#endif
+    fota_component_post_install_handler_t component_post_install_cb;
     fota_component_curr_fw_read curr_fw_read;
     fota_component_curr_fw_get_digest curr_fw_get_digest;
-    bool need_reboot;
 } fota_component_desc_info_t;
 
 /**
@@ -88,14 +93,32 @@ int fota_component_add(const fota_component_desc_info_t *comp_desc, const char *
 
 /**
  * Convert internal FOTA library semantic version representation to human readable string.
- * 
- * The version in internal FOTA library representation passed to fota_app_on_download_authorization() and 
+ *
+ * The version in internal FOTA library representation passed to fota_app_on_download_authorization() and
  * candidate callback APIs.
  */
 int fota_component_version_int_to_semver(fota_component_version_t version, char *sem_ver);
+
+
+#if defined(TARGET_LIKE_LINUX)
+/**
+ * Install MAIN component by overwriting current executable file
+ * 
+ * This function will overwrite the executable file and relaunch the process.
+ * The API is expected to be called from fota_app_on_install_candidate() application
+ * callback
+ * 
+ * \note This function does not vavlidate candidate file integrity or authenticity.
+ * 
+ * \param candidate_file_name candidate file name as found on file system.
+ */
+int fota_component_install_main(const char *candidate_file_name);
+
+#endif  // defined(TARGET_LIKE_LINUX)
 
 #ifdef __cplusplus
 }
 #endif
 
+#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
 #endif // __FOTA_COMPONENT_H_

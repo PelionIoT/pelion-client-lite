@@ -1,1 +1,4 @@
 test_modules/*
+libs/curl/*
+factory-configurator-client/*
+tinycbor/*

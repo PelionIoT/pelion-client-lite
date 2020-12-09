@@ -20,6 +20,9 @@
 #define __FOTA_INTERNAL_H_
 
 #include "fota/fota_base.h"
+
+#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+
 #include "fota/fota_manifest.h"
 #include "fota/fota_app_ifs.h"
 #include "fota/fota_delta.h"
@@ -47,12 +50,11 @@ typedef enum {
 
 typedef struct {
     manifest_firmware_info_t *fw_info;
-    uint32_t payload_offset;
-    uint32_t fw_bytes_written;
-    uint32_t auth_token;
+    size_t payload_offset;
+    size_t fw_bytes_written;
     unsigned int comp_id;
     fota_state_e state;
-    uint32_t frag_size;
+    size_t frag_size;
 #if !defined(FOTA_DISABLE_DELTA)
     uint8_t *delta_buf;
     fota_delta_ctx_t *delta_ctx;
@@ -64,11 +66,12 @@ typedef struct {
     uint32_t page_buf_size;
     uint8_t *effective_page_buf;
     uint32_t effective_page_buf_size;
-    uint32_t storage_addr;
+    size_t storage_addr;
     uint32_t fw_header_bd_size;
     uint32_t fw_header_offset;
     uint32_t candidate_header_size;
     fota_resume_state_e resume_state;
+    void *download_handle;
 } fota_context_t;
 
 fota_context_t *fota_get_context(void);
@@ -77,14 +80,15 @@ bool fota_is_active_update(void);
 int  fota_is_ready(uint8_t *data, size_t size, fota_state_e *fota_state);
 
 void fota_on_manifest(uint8_t *data, size_t size);
-void fota_on_reject(uint32_t token, int32_t status);
-void fota_on_defer(uint32_t token, int32_t status);
-void fota_on_authorize(uint32_t token, int32_t status);
+void fota_on_reject(int32_t status);
+void fota_on_defer(int32_t status);
+void fota_on_authorize(int32_t status);
 void fota_on_fragment(uint8_t *buf, size_t size);
-void fota_on_fragment_failure(uint32_t token, int32_t status);
-void fota_on_resume(uint32_t token, int32_t status);
+void fota_on_fragment_failure(int32_t status);
+void fota_on_resume(int32_t status);
 #ifdef __cplusplus
 }
 #endif
 
+#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
 #endif // __FOTA_INTERNAL_H_

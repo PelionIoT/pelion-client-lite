@@ -63,6 +63,8 @@ void protoman_layer_state_change(struct protoman_layer_s *layer, int new_state)
 {
     struct protoman_s *protoman = layer->protoman;
 
+    protoman_verbose("");
+
     /* Apply new state */
     int old_state = layer->current_state;
     bool state_transition = old_state != new_state;
@@ -200,6 +202,12 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
             switch (layer->target_state) {
                 case PROTOMAN_STATE_DISCONNECTED:
                     protoman_verbose("disconnecting");
+                    protoman_layer_state_change(layer, PROTOMAN_STATE_DISCONNECTING);
+                    return;
+                case PROTOMAN_STATE_PAUSED:
+                    /* Disconnecting when pausing while connecting was not finished */
+                    protoman_debug("force disconnecting on pausing while connecting");
+                    layer->target_state = PROTOMAN_STATE_DISCONNECTED;
                     protoman_layer_state_change(layer, PROTOMAN_STATE_DISCONNECTING);
                     return;
             }
@@ -370,31 +378,36 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
             break;
 
         case PROTOMAN_STATE_RESUMING:
-             if (NULL != layer->callbacks->state_do_resume) {
-                 retval = layer->callbacks->state_do_resume(layer);
-                 switch (retval) {
-                     case PROTOMAN_STATE_RETVAL_FINISHED:
-                         break;
+            if (layer->target_state == PROTOMAN_STATE_PAUSED) {
+                protoman_verbose("pausing");
+                protoman_layer_state_change(layer, PROTOMAN_STATE_PAUSING);
+            } else if (layer->target_state == PROTOMAN_STATE_RESUMED) {
+                if (NULL != layer->callbacks->state_do_resume) {
+                    retval = layer->callbacks->state_do_resume(layer);
+                    switch (retval) {
+                        case PROTOMAN_STATE_RETVAL_FINISHED:
+                            break;
 
-                     case PROTOMAN_STATE_RETVAL_AGAIN:
-                        delay = delays->do_resume;
-                        goto do_event;
+                        case PROTOMAN_STATE_RETVAL_AGAIN:
+                            delay = delays->do_resume;
+                            goto do_event;
 
-                     case PROTOMAN_STATE_RETVAL_WAIT:
-                         /* wait for PROTOMAN_EVENT_DATA_WRITTEN/AVAILABLE event */
-                         return;
+                        case PROTOMAN_STATE_RETVAL_WAIT:
+                            /* wait for PROTOMAN_EVENT_DATA_WRITTEN/AVAILABLE event */
+                            return;
 
-                     case PROTOMAN_STATE_RETVAL_ERROR:
-                     default:
-                         protoman_err("layer->callbacks->state_do_resume() returned %s (%d)", protoman_strstateretval(retval), retval);
-                         protoman_layer_state_change(layer, PROTOMAN_STATE_ERRORING);
-                         return;
-                 }
-             }
+                        case PROTOMAN_STATE_RETVAL_ERROR:
+                        default:
+                            protoman_err("layer->callbacks->state_do_resume() returned %s (%d)", protoman_strstateretval(retval), retval);
+                            protoman_layer_state_change(layer, PROTOMAN_STATE_ERRORING);
+                            return;
+                    }
+                }
 
-             protoman_info("resumed");
-             protoman_layer_state_change(layer, PROTOMAN_STATE_RESUMED);
-             break;
+                protoman_info("resumed");
+                protoman_layer_state_change(layer, PROTOMAN_STATE_RESUMED);
+            }
+            break;
 
         case PROTOMAN_STATE_INITIALIZED:
         case PROTOMAN_STATE_DISCONNECTED:
@@ -403,18 +416,44 @@ void protoman_generic_layer_run(struct protoman_layer_s *layer)
                     protoman_verbose("connecting");
                     protoman_layer_state_change(layer, PROTOMAN_STATE_CONNECTING);
                     break;
+
+                case PROTOMAN_STATE_DISCONNECTED:
+                    if (layer->current_state == PROTOMAN_STATE_INITIALIZED) {
+                        protoman_verbose("disconnecting");
+                        protoman_layer_state_change(layer, PROTOMAN_STATE_DISCONNECTING);
+                    }
+                    break;
+
+                case PROTOMAN_STATE_PAUSED:
+                    protoman_verbose("pausing");
+                    protoman_layer_state_change(layer, PROTOMAN_STATE_PAUSING);
+                    break;
+
+                case PROTOMAN_STATE_RESUMED:
+                    /* Connecting when resuming from initialized or disconnected state  */
+                    protoman_debug("force connecting on resuming from %s", protoman_strstate(protoman->current_state));
+                    protoman->target_state = PROTOMAN_STATE_CONNECTED;
+                    protoman_layer_state_change(protoman, PROTOMAN_STATE_CONNECTING);
+                    break;
             }
             break;
 
         case PROTOMAN_STATE_ERRORING:
-            if (PROTOMAN_ERR_CONNECTION_CLOSED == layer->protoman_error) {
-                protoman_info("PROTOMAN_STATE_ERRORING, connection closed.");
-            } else {
-                protoman_err("PROTOMAN_STATE_ERRORING %s (%d)",
-                             protoman_strstateretval(protoman_get_layer_error(protoman)),
-                             protoman_get_layer_error(protoman));
+            switch (layer->target_state) {
+                case PROTOMAN_STATE_PAUSED:
+                    protoman_verbose("pausing");
+                    protoman_layer_state_change(layer, PROTOMAN_STATE_PAUSING);
+                    break;
+                default:
+                    if (PROTOMAN_ERR_CONNECTION_CLOSED == layer->protoman_error) {
+                        protoman_info("PROTOMAN_STATE_ERRORING, connection closed.");
+                    } else {
+                        protoman_err("PROTOMAN_STATE_ERRORING %s (%d)",
+                                    protoman_strstateretval(protoman_get_layer_error(protoman)),
+                                    protoman_get_layer_error(protoman));
+                    }
+                    protoman_layer_state_change(layer, PROTOMAN_STATE_ERRORED);
             }
-            protoman_layer_state_change(layer, PROTOMAN_STATE_ERRORED);
             break;
 
         case PROTOMAN_STATE_ERRORED:

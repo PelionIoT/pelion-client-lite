@@ -200,56 +200,74 @@ typedef enum {
  */
 typedef struct lwm2m_interface_s {
 
-    connection_t                    connection; ///< Connection data.
-    endpoint_t                      endpoint; ///< Endpoint data.
-#ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
-    interface_callback_handler      callback_handler; ///< Pointer to a callback handler.
-#endif //MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
     int8_t                          event_handler_id; ///< ID for the interface event handler.
 
     // An observer needs to give us a tasklet ID and a pointer to their context.
     int8_t                          observer_id; ///< Event handler ID of the observer.
+
+    uint16_t                        server_port; ///< LwM2M server port.
+    // TODO: pass this to connection?
+    uint16_t                        listen_port; ///< Local port.
+    uint8_t                         current_state; ///< Interface state.
+
+    // Note: next bool and enum variables were earlier packed to bitfields,
+    // which saved ~8 bytes of RAM. But it also made binary ~174 bytes bigger on Cortex M0.
+    // So this version is now a trade-off between ROM and RAM.
+
+    uint8_t                         reconnect_attempt; ///< Number of reconnection attempts.
+    uint8_t                         initial_reconnection_time; ///< Initial delay for reconnection in seconds.
+    oma_lwm2m_binding_and_mode_t    binding_mode; ///< Connection mode.
+    lwm2m_interface_reconnection_state_t reconnection_state; ///< Reconnection state.
+    bool                            event_ignored; ///< Current event ignored if true.
+    bool                            event_generated; ///< Event has been generated if true.
+    bool                            is_registered; ///< True if registred
+    bool                            reconnecting; ///< Reconnecting if true.
+    bool                            retry_timer_expired; ///< Reconnection timer expired if true.
+    bool                            bootstrapped; ///< Bootstrap done if true.
+#ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
+    bool                            queue_mode_timer_ongoing; ///< Queue mode timer running if true.
+#endif //#ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
+    bool                            unregister_ongoing; ///< Unregistration in progress if true.
+
+    // These variables are here in purpose despite wasting a bit of RAM for alignment,
+    // as on the Cortex M0 this produces much smaller code.
+
+#ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
+    interface_callback_handler      callback_handler; ///< Pointer to a callback handler.
+#endif //MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
+
+#ifndef DISABLE_ERROR_DESCRIPTION
+    // The DISABLE_ERROR_DESCRIPTION macro will reduce the flash usage by ~1800 bytes.
+    const char                      *error_description; ///< Pointer to textual error description in null-terminated string format.
+#endif
     void                            *observer; ///< Set to `data_ptr` field of event sent to observer.
-    // Preallocated event for observer communication.
-    arm_event_storage_t             observer_event; ///< Preallocated event that can be sent to observer.
 
     void                            *network_interface; ///< Pointer to network interface.
-
-    // Even though we provide a function API, we break the direct chain through event loop.
-    arm_event_storage_t             external_event; ///< Preallocated incoming event.
-    lwm2m_interface_event_data_u    external_event_data; ///< Data for the incoming event.
 
     lwm2m_interface_event_data_u    *event_data; ///< Pointer to event data.
 
     uint32_t                        reconnection_time; ///< Delay for reconnecting in seconds.
-    char                            server_ip_address[MAX_ALLOWED_IP_STRING_LENGTH]; ///< Server address in null terminated string format.
+
+    // Preallocated event for observer communication.
+    arm_event_storage_t             observer_event; ///< Preallocated event that can be sent to observer.
+
+    // Even though we provide a function API, we break the direct chain through event loop.
+    arm_event_storage_t             external_event; ///< Preallocated incoming event.
+
+    endpoint_t                      endpoint; ///< Endpoint data.
+
+    connection_t                    connection; ///< Connection data.
+
+    lwm2m_interface_event_data_u    external_event_data; ///< Data for the incoming event.
+
 #ifdef PROTOMAN_SECURITY_ENABLE_PSK
     uint8_t                         psk[MAX_ALLOWED_PSK_SIZE];
     uint8_t                         psk_size;
     uint8_t                         psk_id[MAX_ALLOWED_PSK_ID_SIZE];
     uint8_t                         psk_id_size;
 #endif //PROTOMAN_SECURITY_ENABLE_PSK
-#ifndef DISABLE_ERROR_DESCRIPTION
-    // The DISABLE_ERROR_DESCRIPTION macro will reduce the flash usage by ~1800 bytes.
-    const char                      *error_description; ///< Pointer to textual error description in null-terminated string format.
-#endif
-    uint16_t                        server_port; ///< LwM2M server port.
-    // TODO: pass this to connection?
-    uint16_t                        listen_port; ///< Local port.
-    uint8_t                         current_state; ///< Interface state.
-    uint8_t                         initial_reconnection_time:4; ///< Initial delay for reconnection in seconds.
-    uint8_t                         reconnect_attempt; ///< Number of reconnection attempts.
-    oma_lwm2m_binding_and_mode_t    binding_mode:4; ///< Connection mode.
-    lwm2m_interface_reconnection_state_t reconnection_state:2; ///< Reconnection state.
-    bool                            event_ignored:1; ///< Current event ignored if true.
-    bool                            event_generated:1; ///< Event has been generated if true.
-    bool                            reconnecting:1; ///< Reconnecting if true.
-    bool                            retry_timer_expired:1; ///< Reconnection timer expired if true.
-    bool                            bootstrapped:1; ///< Bootstrap done if true.
-#ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
-    bool                            queue_mode_timer_ongoing:1; ///< Queue mode timer running if true.
-#endif //#ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
-    bool                            unregister_ongoing:1; ///< Unregistration in progress if true.
+
+    char                            server_ip_address[MAX_ALLOWED_IP_STRING_LENGTH]; ///< Server address in null terminated string format.
 
 } lwm2m_interface_t;
 

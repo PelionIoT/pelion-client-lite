@@ -55,6 +55,9 @@ const void *storage_read_ca_certificate(size_t *buffer_size, bool bootstrap);
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 bool storage_set_credentials(registry_t *registry);
 bool storage_set_bootstrap_credentials(registry_t *registry);
+#ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
+bool storage_clear_credentials(registry_t *registry);
+#endif //MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 #endif
 
 char *storage_read_internal_endpoint_name(char *buffer, int32_t *buffer_size, const bool bootstrap);
