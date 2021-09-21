@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2019 ARM Ltd.
+// Copyright 2019-2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -20,7 +20,7 @@
 #define INCLUDE_BSPATCH_PRIVATE_H_
 
 #include "bspatch.h"
-#include "common.h"
+#include "bspatch_common.h"
 
 /* Patch applied successfully, but new file is not ready yet. User should re-fill patch buffer and call bspatch again. */
 #define BSPATCH_NEED_MORE_PATCH_DATA 1

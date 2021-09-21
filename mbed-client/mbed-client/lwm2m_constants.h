@@ -220,7 +220,7 @@
 #define ERROR_MEMORY_FAIL       "MemoryFail"
 #define ERROR_UNREGISTER_FAIL   "UnregisterFail"
 
-#define MAX_RECONNECT_TIMEOUT        604800
+#define MAX_RECONNECT_TIMEOUT        0x94000 // 1 week in seconds (24*7*60*60), rounded up to easier binary value, so 1 week and 23 minutes
 #define RECONNECT_INCREMENT_FACTOR   2
 // TLV serializer / deserializer
 #define TYPE_RESOURCE 0xC0

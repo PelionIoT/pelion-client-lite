@@ -83,9 +83,12 @@ int8_t connection_init(connection_t *connection, void(*event_handler)(connection
 #if defined(PROTOMAN_USE_SSL_SESSION_RESUME) || defined(PROTOMAN_OFFLOAD_TLS)
         , bool bootstrap
 #endif
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+        , bool ignore_session_resume
+#endif
         )
 {
-
+    connection->initialized = true;
     connection->event_handler = event_handler;
     connection->event_handler_id = event_handler_id;
 
@@ -106,7 +109,13 @@ int8_t connection_init(connection_t *connection, void(*event_handler)(connection
 #if defined (PROTOMAN_SECURITY_ENABLE_CERTIFICATE)
         struct protoman_config_tls_certificate_s *tls_configuration;
         memset(&connection->protoman_layer_mbedtls, 0, sizeof(struct protoman_layer_mbedtls_certificate_s));
-        protoman_add_layer_mbedtls(&connection->protoman, (protoman_layer_id_t)&connection->protoman_layer_mbedtls);
+        protoman_add_layer_mbedtls(
+            &connection->protoman,
+            (protoman_layer_id_t)&connection->protoman_layer_mbedtls
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+            , ignore_session_resume
+#endif
+            );
 
         tls_configuration = protoman_get_config(&connection->protoman, (protoman_layer_id_t)&connection->protoman_layer_mbedtls);
 
@@ -131,7 +140,13 @@ int8_t connection_init(connection_t *connection, void(*event_handler)(connection
 #elif defined (PROTOMAN_SECURITY_ENABLE_PSK)
         struct protoman_config_tls_psk_s *tls_configuration;
         memset(&connection->protoman_layer_mbedtls, 0, sizeof(struct protoman_layer_mbedtls_psk_s));
-        protoman_add_layer_mbedtls(&connection->protoman, (protoman_layer_id_t)&connection->protoman_layer_mbedtls);
+        protoman_add_layer_mbedtls(
+            &connection->protoman,
+            (protoman_layer_id_t)&connection->protoman_layer_mbedtls,
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+            , false
+#endif
+            );
         tls_configuration = protoman_get_config(&connection->protoman, (protoman_layer_id_t)&connection->protoman_layer_mbedtls);
 
         tls_configuration->common.security_mode = PROTOMAN_SECURITY_MODE_PSK;
@@ -184,27 +199,48 @@ void connection_destroy(connection_t *connection)
 
 void connection_close(connection_t *connection)
 {
+    connection->initialized = false;
     protoman_close(&connection->protoman);
 }
 
-void connection_start(connection_t *connection)
+bool connection_start(connection_t *connection)
 {
-    protoman_connect(&connection->protoman);
+    if (connection->initialized) {
+        protoman_connect(&connection->protoman);
+        return true;
+    }
+
+    return false;
 }
 
-void connection_stop(connection_t *connection)
+bool connection_stop(connection_t *connection)
 {
-    protoman_disconnect(&connection->protoman);
+    if (connection->initialized) {
+        protoman_disconnect(&connection->protoman);
+        return true;
+    }
+
+    return false;
 }
 
-void connection_pause(connection_t *connection)
+bool connection_pause(connection_t *connection)
 {
-    protoman_pause(&connection->protoman);
+    if (connection->initialized) {
+        protoman_pause(&connection->protoman);
+        return true;
+    }
+
+    return false;
 }
 
-void connection_resume(connection_t *connection)
+bool connection_resume(connection_t *connection)
 {
-    protoman_resume(&connection->protoman);
+    if (connection->initialized) {
+        protoman_resume(&connection->protoman);
+        return true;
+    }
+
+    return false;
 }
 
 
@@ -339,14 +375,14 @@ int8_t connection_set_entropy_callback(connection_t *connection, entropy_cb call
 }
 #endif // #ifndef PROTOMAN_OFFLOAD_TLS
 
-static void connection_send_event(connection_t *connection, uint8_t type, uint32_t status)
+static void connection_send_event(connection_t *connection, connection_event_t type, uint32_t status)
 {
     arm_event_t event;
 
     event.data_ptr = connection->context;
     event.event_data = status;
     event.event_id = CONNECTION_EVENT_ID;
-    event.event_type = type;
+    event.event_type = (uint8_t)type;
     event.priority = ARM_LIB_LOW_PRIORITY_EVENT;
     event.receiver = connection->event_handler_id;
     event.sender = 0;
@@ -360,4 +396,39 @@ static void connection_send_event(connection_t *connection, uint8_t type, uint32
 void connection_interface_status(connection_t *connection, bool up)
 {
     connection_send_event(connection, CONNECTION_EVENT_INTERFACE_STATUS, !up);
+}
+
+void set_cid_value(struct connection_s *connection, const uint8_t *data_ptr, const size_t data_len)
+{
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    struct protoman_layer_s *layer = (struct protoman_layer_s *)&connection->protoman_layer_mbedtls;
+    protoman_set_cid_value(layer, data_ptr, data_len);
+#endif
+}
+
+
+void store_connection_id(struct connection_s *connection)
+{
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    struct protoman_layer_s *layer = (struct protoman_layer_s *)&connection->protoman_layer_mbedtls;
+    store_ssl_session_context_to_storage(layer);
+#endif
+}
+
+void remove_connection_id(struct connection_s *connection)
+{
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    struct protoman_layer_s *layer = (struct protoman_layer_s *)&connection->protoman_layer_mbedtls;
+    remove_ssl_session(layer);
+#endif
+}
+
+bool is_connection_id_available()
+{
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    return protoman_is_connection_id_available();
+#else
+    return true;
+#endif
+
 }

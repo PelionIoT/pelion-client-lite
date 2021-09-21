@@ -126,7 +126,7 @@ typedef struct endpoint_s {
 #if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
     bool coap_ping_request; ///< CoAP ping request is pending.
 #endif
-
+    uint16_t tick_remainder; ///< tick-rate is EVENTOS_EVENT_TIMER_HZ/s, use it to update coap_time in case of starvation.
     send_queue_t send_queue; ///< Data allocated for send queue.
 
     struct connection_s *connection; ///< Pointer to connection.
@@ -157,6 +157,7 @@ typedef struct endpoint_s {
     notifier_t notifier; ///< Data allocated for notifier.
 
     endpoint_confirmable_response_t confirmable_response; ///< Data allocated for storing a response.
+    uint32_t old_tick; ///< save value of eventOS_event_timer_ticks, at beetween endpoint_get_coap_time calls.
 
 } endpoint_t;
 
@@ -498,7 +499,7 @@ coap_req_cb *endpoint_get_coap_request_callback(endpoint_t *endpoint, uint16_t o
 
 registry_callback_t endpoint_get_object_callback(endpoint_t *endpoint, uint16_t object_id);
 
-int endpoint_send_notification_int(endpoint_t *endpoint, uint16_t object_id, uint16_t aobs_id, int64_t value);
+int endpoint_send_notification_int(endpoint_t *endpoint, registry_path_t *path, uint16_t aobs_id, int64_t value);
 
 #endif
 

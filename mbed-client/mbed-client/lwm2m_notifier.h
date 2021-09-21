@@ -36,11 +36,9 @@ extern "C" {
  */
 typedef struct notifier_s {
     uint16_t message_id; ///< Message ID of the last notification or 0.
-#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
-    uint16_t last_notified;  ///< Object ID of the last Resource notified if `message_id` is not 0.
-#else
     registry_path_t last_notified; ///< Path of the last Resource notified if `message_id` is not 0.
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     // Note: following bools were stored in a bitfields, but it wasted ~64B of ROM while saving only <2 bytes of RAM.
     bool block_notify; ///< Flag set if notification sent using block transfer.
     bool running; ///< Flag set if running.

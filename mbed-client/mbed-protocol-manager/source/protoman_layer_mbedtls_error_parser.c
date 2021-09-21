@@ -221,6 +221,11 @@ const char *protoman_strmbedtls(int errcode)
         case MBEDTLS_ERR_PLATFORM_FAULT_DETECTED:
             return "MBEDTLS_ERR_PLATFORM_FAULT_DETECTED";
 #endif
+#if (PROTOMAN_USE_SSL_SESSION_RESUME == 1)
+        case MBEDTLS_ERR_SSL_VERSION_MISMATCH:
+        	return "MBEDTLS_ERR_SSL_VERSION_MISMATCH";
+#endif
+
         default:
             return "UNKNOWN";
     }

@@ -17,15 +17,9 @@
 // ----------------------------------------------------------------------------
 
 
-#ifdef MBED_CLIENT_USER_CONFIG_FILE
-#include MBED_CLIENT_USER_CONFIG_FILE
-#endif
-
 #ifdef MBED_CLOUD_CLIENT_USER_CONFIG_FILE
 #include MBED_CLOUD_CLIENT_USER_CONFIG_FILE
 #endif
-
-#define PDMC_CONNECT_STARTUP_EVENT_TYPE 6
 
 #include "mbed-trace/mbed_trace.h"
 #include "mbed-client/lwm2m_endpoint.h"
@@ -80,7 +74,8 @@ static void fota_update_init(void);
 
 #define TRACE_GROUP "pdmc"
 
-typedef enum {  // note these are encapsulated to u8 type, so remember limit 255 if more events are created
+#define PDMC_APPLICATION_EVENT_TYPE 0
+typedef enum {  // note these are encapsulated to u8 type, so remember limit 255 if more events are created.
     APPLICATION_EVENT_HANDLER_UPDATE_INIT = 200,
     APPLICATION_EVENT_START_BOOTSTRAP,
     APPLICATION_EVENT_REGISTER,
@@ -168,7 +163,7 @@ static int pdmc_connect_set_observable_and_callback(registry_t *registry, const 
                                             bool auto_observable, registry_callback_t callback);
 
 #endif
-static void send_event(uint8_t event_type);
+static void send_event(uint8_t event_id);
 static void forward_event_to_external_interface(arm_event_t *orig_event);
 static oma_lwm2m_binding_and_mode_t get_binding_mode(void);
 static registry_status_t reboot_callback(registry_callback_type_t type,
@@ -189,7 +184,9 @@ static endpoint_t *pdmc_connect_get_endpoint(void);
 static registry_t *pdmc_connect_get_registry(void);
 #endif
 
+#ifndef NDEBUG
 static bool interface_is_initialized(void);
+#endif
 
 /**
 * \brief initialises update
@@ -213,14 +210,14 @@ static void pdmc_connect_event_handler(arm_event_t *event)
 {
     event_in_flight = false;
 
-    if (event->event_type == PDMC_CONNECT_STARTUP_EVENT_TYPE && event->event_id == 0) {
+    if (event->event_type == PDMC_CONNECT_STARTUP_EVENT_TYPE) {
         return;
     }
 
     if (event->event_id > LWM2M_INTERFACE_FIRST_EVENT_ID &&
             event->event_id < LWM2M_INTERFACE_LAST_EVENT_ID) {
         if (event->event_id == LWM2M_INTERFACE_OBSERVER_EVENT_BOOTSTRAP_DONE) {
-            tr_debug("pdmc_connect_event_handler - LWM2M_INTERFACE_OBSERVER_EVENT_BOOTSTRAP_DONE");
+            tr_debug("event_handler - LWM2M_INTERFACE_OBSERVER_EVENT_BOOTSTRAP_DONE");
             pdmc_connect_init_update();  // moves to the registration
         }
 
@@ -276,7 +273,7 @@ static void pdmc_connect_event_handler(arm_event_t *event)
             break;
 #endif
         default:
-            tr_error("pdmc_connect_event_handler - unhandled event: %" PRId8 " sender %x", event->event_id, event->sender);
+            tr_error("event_handler - unhandled event: %" PRId8 " sender %x", event->event_id, event->sender);
             break;
     }
 }
@@ -587,7 +584,7 @@ static int get_device_object_resources(endpoint_t *endpoint, register_resource_t
     assert(value_available);
 
     curr->next = endpoint_create_register_resource_str(endpoint, hardware_version_res_id, false,
-                                                        value_str, strlen(value_str));
+                                                        (const uint8_t*)value_str, strlen(value_str));
     curr = curr->next;
     if (!curr) {
         return -1;
@@ -606,6 +603,15 @@ static int get_device_object_resources(endpoint_t *endpoint, register_resource_t
     }
 #endif
 
+#if MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_6 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_7 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_8 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_9 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_13 || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_18 \
+    || MBED_CLOUD_CLIENT_ENABLE_DEVICE_OBJECT_RESOURCE_20
+
+    // silence warning for unused variable on release builds
+    (void)value_available;
+#endif
+
     return 0;
 }
 
@@ -617,7 +623,7 @@ static sn_coap_hdr_s *on_device_object_coap_request(const registry_path_t* path,
                                       int *acked)
 {
 
-    tr_debug("dmc_connect_api - on_device_object_coap_request()");
+    tr_debug("on_device_object_coap_request()");
 
     if (memcmp("3/0/4", (char*)request->uri_path_ptr, request->uri_path_len) == 0) {
         tr_debug("on_device_object_coap_request() - response code: %d", response->msg_code);
@@ -717,7 +723,7 @@ static oma_lwm2m_binding_and_mode_t get_binding_mode(void)
 #endif
 }
 
-static void send_event(uint8_t event_type)
+static void send_event(uint8_t event_id)
 {
     assert(interface_is_initialized());
 
@@ -729,9 +735,9 @@ static void send_event(uint8_t event_type)
     user_allocated_event.data.data_ptr = NULL;
     user_allocated_event.data.event_data = 0;
     user_allocated_event.data.sender = 0;
-    user_allocated_event.data.event_type = 0;
+    user_allocated_event.data.event_type = PDMC_APPLICATION_EVENT_TYPE;
     user_allocated_event.data.receiver = internal_event_handler_id;
-    user_allocated_event.data.event_id = event_type;
+    user_allocated_event.data.event_id = event_id;
     user_allocated_event.data.priority = ARM_LIB_LOW_PRIORITY_EVENT;
 
     eventOS_event_send_user_allocated(&user_allocated_event);
@@ -779,6 +785,7 @@ static registry_t *pdmc_connect_get_registry(void)
 }
 #endif
 
+#ifndef NDEBUG
 static bool interface_is_initialized(void)
 {
 #if MBED_CLOUD_CLIENT_DYNAMIC_INTERFACE_ALLOC
@@ -787,7 +794,7 @@ static bool interface_is_initialized(void)
     return (internal_event_handler_id != -1);
 #endif
 }
-
+#endif
 
 void pdmc_connect_init(uint8_t event_handler_id)
 {
@@ -824,7 +831,7 @@ void pdmc_connect_init(uint8_t event_handler_id)
             free(interface);
             interface = NULL;
 #endif
-            tr_error("pdmc_connect_init - failed to create event handler");
+            tr_error("init - failed to create event handler");
             assert(false);
             return;
         }
@@ -845,7 +852,7 @@ void pdmc_connect_init(uint8_t event_handler_id)
     evt.priority = ARM_LIB_LOW_PRIORITY_EVENT;
 
     if (eventOS_event_send(&evt) < 0) {
-        tr_error("pdmc_connect_init - failed to send event");
+        tr_error("init - failed to send event");
         assert(false);
     }
 
@@ -855,7 +862,7 @@ void pdmc_connect_init(uint8_t event_handler_id)
 #else
     object_handler_t *handler = endpoint_allocate_object_handler(M2M_DEVICE_ID, get_device_object_resources, on_device_object_coap_request, reboot_callback);
     if (!handler) {
-        tr_error("pdmc_connect_init() failed to allocate object handler");
+        tr_error("init - failed to allocate object handler");
         assert(handler); // if this happens it's a fatal error
         return;
     }
@@ -1086,7 +1093,7 @@ static void init_update_event(arm_event_s *ev, void *cb, uintptr_t param)
 static bool schedule_update_event(arm_event_storage_t *ev, void *cb, uintptr_t param)
 {
     if (ev == NULL) {
-        tr_info("schedule_update_event - event is null!");
+        tr_info("schedule_update_event - event is null");
         return false;
     }
 

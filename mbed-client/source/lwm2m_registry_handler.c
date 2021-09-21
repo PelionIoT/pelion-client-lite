@@ -37,8 +37,10 @@
 #define TRACE_GROUP "RegH"
 
 static uint8_t parse_registry_path(const uint8_t* buf, size_t len, registry_path_t* path);
-#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+#ifdef MBED_CLIENT_ENABLE_DYNAMIC_CREATION
 static char *registry_path_to_string(const registry_path_t* path);
+#endif
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static bool send_callback_data(const registry_path_t *path, const sn_coap_hdr_s* header, const uint8_t type);
 static sn_coap_hdr_s* handle_get_request(const registry_path_t* path, endpoint_t* endpoint, sn_coap_hdr_s* received_coap_header);
 static sn_coap_hdr_s* handle_put_request(const registry_path_t* path, endpoint_t *endpoint, sn_coap_hdr_s* received_coap_header);
@@ -145,7 +147,7 @@ static uint8_t parse_registry_path(const uint8_t* buf, size_t len, registry_path
     return pathpart;
 }
 
-#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+#ifdef MBED_CLIENT_ENABLE_DYNAMIC_CREATION
 static char *registry_path_to_string(const registry_path_t* path)
 {
     /* four uint16_t fields, three slashes and terminating null byte */
@@ -161,7 +163,7 @@ static char *registry_path_to_string(const registry_path_t* path)
                 len = snprintf(pathstr, PATH_MAX_LENGTH, "/%u/%u", path->object_id, path->object_instance_id);
                 break;
             default:
-                tr_error("registry_path_to_string - unsupported path!");
+                tr_error("unsupported path type: %d", path->path_type);
                 assert(0);
                 break;
         }
@@ -174,7 +176,9 @@ static char *registry_path_to_string(const registry_path_t* path)
 
     return pathstr;
 }
+#endif
 
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static sn_coap_hdr_s* handle_get_request(const registry_path_t* path, endpoint_t* endpoint, sn_coap_hdr_s* received_coap_header)
 {
 
@@ -326,7 +330,7 @@ static sn_coap_hdr_s* handle_get_request(const registry_path_t* path, endpoint_t
     }
 
     if (registry_get_max_age(&endpoint->registry, path, &coap_response->options_list_ptr->max_age) != REGISTRY_STATUS_OK) {
-        tr_error("handle_get_request() could not read max_age from registry!");
+        tr_error("handle_get_request() could not read max_age from registry");
         // XXX: setting the default here could be masking an actual error in registry
         coap_response->options_list_ptr->max_age = LWM2M_VALUE_CACHE_MAX_AGE;
     }
@@ -1102,6 +1106,8 @@ bool handle_coap_response(endpoint_t* endpoint, sn_coap_hdr_s *received_coap_hea
         registry_notification_status_t notification_status;
         if (received_coap_header->msg_type == COAP_MSG_TYPE_ACKNOWLEDGEMENT) {
             notification_status = NOTIFICATION_STATUS_DELIVERED;
+        } else if (received_coap_header->msg_type == COAP_MSG_TYPE_RESET) {
+            notification_status = NOTIFICATION_STATUS_UNSUBSCRIBED;
         } else if (received_coap_header->coap_status == COAP_STATUS_BUILDER_MESSAGE_SENDING_FAILED) {
             notification_status = NOTIFICATION_STATUS_SEND_FAILED;
         } else {
@@ -1111,7 +1117,7 @@ bool handle_coap_response(endpoint_t* endpoint, sn_coap_hdr_s *received_coap_hea
         endpoint->notifier.notifying = false;
         endpoint->notifier.message_id = 0;
 
-        callback = endpoint_get_object_callback(endpoint, endpoint->notifier.last_notified);
+        callback = endpoint_get_object_callback(endpoint, endpoint->notifier.last_notified.object_id);
         if (callback) {
             // Call callback with NULL path. It's up to the sender of the notification to keep track of what notification is being sent
             callback(REGISTRY_CALLBACK_NOTIFICATION_STATUS, NULL, NULL, NULL, notification_status, endpoint);

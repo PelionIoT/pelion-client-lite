@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2020 ARM Limited. All rights reserved.
+ * Copyright (c) 2017-2021 Pelion. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  * Licensed under the Apache License, Version 2.0 (the License); you may
  * not use this file except in compliance with the License.
@@ -44,7 +44,7 @@
 
 #define TRACE_GROUP "lwEP"
 
-static const char MCC_VERSION[] = "mccv=1.3.0-lite";
+static const char MCC_VERSION[] = "mccv=1.4.0-lite";
 #ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 static const char iep_name_parameter[] ="iep="; /* Internal endpoint name*/
 #endif //MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
@@ -60,7 +60,9 @@ static const char bs_ep_name[] = "ep="; // same as normal ep-name?!
 static const char ep_lifetime_parameter[] = "lt="; /* Lifetime. Number of seconds that this registration will be valid for. Must be updated within this time, or will be removed. */
 static const char et_parameter[] = "et="; /* Endpoint type */
 static const char bs_queue_mode[] = "b=";
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static const char obs_parameter[] = {'o', 'b', 's'}; /* Observable */
+#endif
 #if MBED_CLIENT_ENABLE_AUTO_OBSERVATION
 static const char auto_obs_parameter[] = {'a', 'o', 'b', 's', '='}; /* Auto observable */
 #endif
@@ -134,6 +136,8 @@ static uint8_t coap_tx_callback(uint8_t *data_ptr, uint16_t data_len, sn_nsdl_ad
 static int8_t endpoint_rx_function(sn_coap_hdr_s *coap_packet_ptr, sn_nsdl_addr_s *address_ptr, void* param);
 
 static void* lwm2m_alloc_uint16(uint16_t size);
+
+static uint32_t endpoint_get_coap_time(endpoint_t *ep);
 static void endpoint_coap_timer(void *ep);
 
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
@@ -151,10 +155,28 @@ static void calculate_new_coap_ping_send_time(endpoint_t *endpoint);
 
 static bool endpoint_command(endpoint_t *endpoint, unsigned message_type);
 
+static uint32_t endpoint_get_coap_time(endpoint_t *ep)
+{
+    uint32_t old_tick = ep->old_tick; // initialized to value of eventOS_event_timer_ticks()
+    uint_fast16_t remainder = ep->tick_remainder; // initialized to 50
+    uint32_t current_tick = eventOS_event_timer_ticks();
+    remainder += current_tick - old_tick;
+    // If multiple seconds has passed between calls this loop will fast-forward to catch up.
+    // nanostack-eventloop tick-rate is EVENTOS_EVENT_TIMER_HZ/s, so EVENTOS_EVENT_TIMER_HZ ticks elapsed == 1 second elapsed.
+    while (remainder >= EVENTOS_EVENT_TIMER_HZ) {
+        remainder -= EVENTOS_EVENT_TIMER_HZ;
+        ep->coap_time++;
+    }
+    ep->old_tick = current_tick;
+    ep->tick_remainder = remainder;
+
+    return ep->coap_time;
+}
+
 static void endpoint_coap_timer(void *ep)
 {
     endpoint_t *endpoint = ep;
-    sn_coap_protocol_exec(endpoint->coap, endpoint->coap_time++);
+    sn_coap_protocol_exec(endpoint->coap, endpoint_get_coap_time(endpoint));
 #if defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_TCP_QUEUE)
     endpoint_request_coap_ping(endpoint);
 #endif
@@ -221,7 +243,14 @@ int endpoint_setup(endpoint_t *endpoint, int8_t event_handler_id)
 
     endpoint->event_handler_id = event_handler_id;
 
+    endpoint->old_tick = eventOS_event_timer_ticks();
+    // To reduce the effect of jitter remainder is originally initialized to 50.
+    // Time is incremented if remainder is in range 50-150, i.e. "in the middle of a second".
+    // This allows up to 0.5s jitter before gaps or clumping in the tick values coap library sees.
+    endpoint->tick_remainder = 50;
+
     endpoint->coap_time = 0;
+
     endpoint->coap_timeout = eventOS_timeout_every_ms(&endpoint_coap_timer, 1000, endpoint);
     if (!endpoint->coap_timeout) {
         return ENDPOINT_STATUS_ERROR;
@@ -369,7 +398,7 @@ int endpoint_reset_binding_mode(registry_t *registry, const oma_lwm2m_binding_an
     registry_status_t status = registry_is_value_empty(registry, &binding_path, &empty);
 
     if (status != REGISTRY_STATUS_OK && status != REGISTRY_STATUS_NO_DATA) {
-        tr_error("endpoint_reset_binding_mode() could not check resource emptyness from registry");
+        tr_error("reset_binding_mode() could not check resource emptyness from registry");
         return ENDPOINT_STATUS_ERROR;
     }
 
@@ -400,7 +429,7 @@ int endpoint_reset_binding_mode(registry_t *registry, const oma_lwm2m_binding_an
         }
 
         if (registry_set_value_string(registry, &binding_path, (char*)binding_mode, 0) != REGISTRY_STATUS_OK) {
-            tr_error("endpoint_set_binding_mode() setting mode to registry failed!");
+            tr_error("set_binding_mode() setting mode to registry failed");
             return ENDPOINT_STATUS_ERROR;
         }
     }
@@ -540,7 +569,7 @@ void endpoint_send_message(endpoint_t *endpoint)
         endpoint->registered = false;
     }
 
-    tr_info("endpoint_send_message, type: %d", endpoint->message_type);
+    tr_info("send_message, type: %d", endpoint->message_type);
 
     if (ENDPOINT_STATUS_OK == endpoint_send_pending_message(endpoint)) {
         endpoint->last_message_type = endpoint->message_type;
@@ -610,7 +639,7 @@ int endpoint_send_event(endpoint_t *endpoint, uint8_t type, uint32_t coap_msg_st
     event.sender = 0;
 
     if (0 > eventOS_event_send(&event)) {
-        tr_error("eventOS_event_send failed.");
+        tr_error("eventOS_event_send failed");
         return ENDPOINT_STATUS_ERROR;
     }
 
@@ -697,7 +726,7 @@ int endpoint_process_coap(endpoint_t *endpoint, uint8_t *packet_ptr, uint16_t pa
 
 #if SN_COAP_DUPLICATION_MAX_MSGS_COUNT
     if (coap_packet_ptr->coap_status == COAP_STATUS_PARSER_DUPLICATED_MSG) {
-        tr_info("endpoint_process_coap, received duplicate message, ignore");
+        tr_info("process_coap, received duplicate message, ignore");
         sn_coap_parser_release_allocated_coap_msg_mem(endpoint->coap, coap_packet_ptr);
         return ENDPOINT_STATUS_OK;
     }
@@ -707,7 +736,7 @@ int endpoint_process_coap(endpoint_t *endpoint, uint8_t *packet_ptr, uint16_t pa
     if (coap_packet_ptr->options_list_ptr) {
         if (coap_packet_ptr->options_list_ptr->proxy_uri_len) {
 
-            tr_warn("endpoint_process_coap, proxy option found, not supported.");
+            tr_warn("process_coap, proxy option found, not supported");
 
             coap_response_ptr = sn_coap_build_response(endpoint->coap, coap_packet_ptr, COAP_MSG_CODE_RESPONSE_PROXYING_NOT_SUPPORTED);
 
@@ -767,7 +796,7 @@ int endpoint_send_coap_message(endpoint_t *endpoint, sn_nsdl_addr_s *address_ptr
 
     if (!address_ptr) {
         if (get_nsdl_address(endpoint, &address) != ENDPOINT_STATUS_OK) {
-            tr_error("endpoint_send_coap_message get_nsdl_address failed.");
+            tr_error("send_coap_message get_nsdl_address failed");
             return ENDPOINT_STATUS_ERROR;
         }
         address_ptr = &address;
@@ -775,26 +804,27 @@ int endpoint_send_coap_message(endpoint_t *endpoint, sn_nsdl_addr_s *address_ptr
 
 #if SN_COAP_MAX_BLOCKWISE_PAYLOAD_SIZE /* If Message blockwising is not used at all, this part of code will not be compiled */
     ret_val = prepare_blockwise_message(endpoint->coap, coap_hdr_ptr);
-    if( 0 != ret_val ) {
-        tr_error("endpoint_send_coap_message prepare_blockwise_message failed.");
+    if (0 != ret_val) {
+        tr_error("send_coap_message prepare_blockwise failed err: %d", ret_val);
         return ENDPOINT_STATUS_ERROR_MEMORY_FAILED;
     }
 #endif
 
     /* Calculate message length */
     message_len = sn_coap_builder_calc_needed_packet_data_size_2(coap_hdr_ptr, endpoint->coap->sn_coap_block_data_size);
-    tr_debug("sn_nsdl_send_coap_message - msg len after calc: [%d]", message_len);
-    tr_debug("sn_send_send_coap_message - msg id: [%d]", coap_hdr_ptr->msg_id);
+    tr_debug("send_coap_message - msg len after calc: [%d]", message_len);
+    tr_debug("send_coap_message - msg id: [%d]", coap_hdr_ptr->msg_id);
 
 
     /* Allocate memory for message and check was allocating successfully */
     message_ptr = lwm2m_alloc(message_len);
     if (message_ptr == NULL) {
-        tr_error("endpoint_send_coap_message lwm2m_alloc failed.");
+        tr_error("send_coap_message lwm2m_alloc(%d) failed", message_len);
         return ENDPOINT_STATUS_ERROR_MEMORY_FAILED;
     }
 
     /* Build CoAP message */
+    endpoint->coap->system_time = endpoint_get_coap_time(endpoint);
     int coap_length = sn_coap_protocol_build(endpoint->coap, address_ptr, message_ptr, coap_hdr_ptr, (void *)endpoint);
     int return_value = ENDPOINT_STATUS_ERROR;
     if (coap_length == -2) {
@@ -803,7 +833,7 @@ int endpoint_send_coap_message(endpoint_t *endpoint, sn_nsdl_addr_s *address_ptr
     if ( coap_length < 0) {
         lwm2m_free(message_ptr);
         message_ptr = 0;
-        tr_error("endpoint_send_coap_message sn_coap_protocol_build failed. Failure reason %d", return_value);
+        tr_error("send_coap_message protocol_build err: %d", return_value);
         return return_value;
     }
 
@@ -829,9 +859,9 @@ int endpoint_send_coap_message(endpoint_t *endpoint, sn_nsdl_addr_s *address_ptr
 
     ret_val = connection_send_data(endpoint->connection, message_ptr, coap_length, true);
     if (ret_val == CONNECTION_STATUS_WOULD_BLOCK) {
-        tr_warn("endpoint_send_coap_message connection_send_data, would block");
+        tr_warn("send_coap_message send_data, would block");
     } else if (ret_val != CONNECTION_STATUS_OK) {
-        tr_err("endpoint_send_coap_message connection_send_data failed, ret_val: %d", ret_val);
+        tr_err("send_coap_message send_data failed, err: %d", ret_val);
     }
     // No need to fail the call at this point as the CoAP library takes care of re-sending if needed now.
 
@@ -839,7 +869,7 @@ int endpoint_send_coap_message(endpoint_t *endpoint, sn_nsdl_addr_s *address_ptr
     calculate_new_coap_ping_send_time(endpoint);
 #endif
 
-    tr_info("endpoint_send_coap_message connection_send_data OK.");
+    tr_info("send_coap_message send_data OK");
     return ENDPOINT_STATUS_OK;
 }
 
@@ -966,7 +996,7 @@ static int endpoint_update_or_unregister_endpoint(endpoint_t *endpoint, sn_nsdl_
     } else {
         // According to OMA LWM2M spec 8.2.3, the server MUST return the location on register,
         // so this branch is not necessarily even needed.
-        tr_error("endpoint_update_endpoint_registration: location not specified");
+        tr_error("update_endpoint_registration: location not specified");
         status = ENDPOINT_STATUS_ERROR;
     }
 
@@ -1073,7 +1103,7 @@ static int endpoint_internal_coap_send(endpoint_t *endpoint, sn_coap_hdr_s *coap
 
     int status;
 
-    tr_debug("endpoint_internal_coap_send");
+    tr_debug("internal_coap_send");
 
     endpoint->message_type = message_description;
     endpoint->message_token = generate_token();
@@ -1138,7 +1168,7 @@ static bool endpoint_handle_endpoint_response(endpoint_t *endpoint, sn_coap_hdr_
                 break;
 
             case ENDPOINT_MSG_UNDEFINED:
-                tr_warn("endpoint_handle_endpoint_response() unhandled CoAP error");
+                tr_warn("handle_response() unhandled CoAP error");
                 return true;
         }
     } else {
@@ -1169,11 +1199,10 @@ static bool endpoint_handle_endpoint_response(endpoint_t *endpoint, sn_coap_hdr_
                 break;
 
             case ENDPOINT_MSG_UNDEFINED:
-                tr_warn("endpoint_handle_response() unhandled CoAP response");
+                tr_warn("handle_response() unhandled CoAP response");
                 return true;
 
         }
-
     }
 
     endpoint->message_type = ENDPOINT_MSG_UNDEFINED;
@@ -1181,7 +1210,6 @@ static bool endpoint_handle_endpoint_response(endpoint_t *endpoint, sn_coap_hdr_
     send_queue_sent(endpoint, true);
 
     return true;
-
 }
 
 static void endpoint_handle_response(endpoint_t *endpoint, sn_coap_hdr_s *coap_header)
@@ -1213,7 +1241,7 @@ static void endpoint_handle_response(endpoint_t *endpoint, sn_coap_hdr_s *coap_h
         // Response was handled.
         if (coap_header->coap_status == COAP_STATUS_BUILDER_MESSAGE_SENDING_FAILED ||
             coap_header->coap_status == COAP_STATUS_BUILDER_BLOCK_SENDING_FAILED) {
-            tr_warn("endpoint_handle_response CoAP message sending failed status: %d", coap_header->coap_status);
+            tr_warn("handle_response CoAP message sending failed status: %d", coap_header->coap_status);
             endpoint->registered = false;
         }
     }
@@ -1244,7 +1272,7 @@ static int endpoint_handle_registration_response(endpoint_t *endpoint, const sn_
         // would likely not include an explicit Max-Age option, in which case we'd see the default 60 seconds.
         if (max_time >= MINIMUM_REGISTRATION_TIME) {
 
-            tr_debug("endpoint_handle_registration_response() setting lifetime from registration response: %"PRId32, max_time);
+            tr_debug("handle_registration_response() setting lifetime from registration response: %"PRId32, max_time);
 
             return endpoint_set_lifetime(endpoint, max_time);
         }
@@ -1261,7 +1289,7 @@ int endpoint_set_retransmission_parameters(endpoint_t *endpoint) {
     // past the client lifetime. the last attempt needs to end before 75% of client lifetime has passed.
     uint32_t lifetime = 0;
     if (ENDPOINT_STATUS_OK != endpoint_get_lifetime(endpoint, &lifetime)) {
-        tr_error("endpoint_set_retransmission_parameters() could not read endpoint lifetime!");
+        tr_error("set_retransmission_parameters() could not read endpoint lifetime");
         return ENDPOINT_STATUS_ERROR;
     }
 
@@ -1281,7 +1309,7 @@ int endpoint_set_retransmission_parameters(endpoint_t *endpoint) {
         reconnection_total_time = MBED_CLIENT_RECONNECTION_INTERVAL + (MBED_CLIENT_RECONNECTION_INTERVAL * (reconnection_count * (reconnection_count + 1)));
         reconnection_total_time += MAXIMUM_RECONNECTION_TIME_INTERVAL;
     }
-    tr_debug("endpoint_set_retransmission_parameters() setting max resend count to %"PRIu32 " with total time: %"PRIu32, reconnection_count, reconnection_total_time);
+    tr_debug("set_retransmission_parameters() setting max resend count to %"PRIu32 " with total time: %"PRIu32, reconnection_count, reconnection_total_time);
 
     if (sn_coap_protocol_set_retransmission_parameters(endpoint->coap, reconnection_count, MBED_CLIENT_RECONNECTION_INTERVAL) < 0) {
         return ENDPOINT_STATUS_ERROR;
@@ -1293,12 +1321,12 @@ int endpoint_set_retransmission_parameters(endpoint_t *endpoint) {
 
 int endpoint_set_lifetime(endpoint_t *endpoint, uint32_t lifetime)
 {
-    tr_debug("endpoint_set_lifetime() lifetime: %"PRIu32, lifetime);
+    tr_debug("set_lifetime() lifetime: %"PRIu32, lifetime);
 
     // doing some gatekeeping here
     if (lifetime > 0 && lifetime < MINIMUM_REGISTRATION_TIME) {
         lifetime = MINIMUM_REGISTRATION_TIME;
-        tr_debug("endpoint_set_lifetime() setting default value (minimum): %"PRIu32, lifetime);
+        tr_debug("set_lifetime() setting default value (minimum): %"PRIu32, lifetime);
     }
 
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
@@ -1313,7 +1341,7 @@ int endpoint_set_lifetime(endpoint_t *endpoint, uint32_t lifetime)
 
 #ifndef SN_COAP_DISABLE_RESENDINGS
     // If the mode is UDP or Queue mode then reconfigure the retransmission count to avoid full registration cycle.
-    if ((endpoint->mode | BINDING_MODE_U) || (endpoint->mode | BINDING_MODE_Q)) {
+    if ((endpoint->mode & BINDING_MODE_U) || (endpoint->mode & BINDING_MODE_Q)) {
         if (endpoint_set_retransmission_parameters(endpoint) != ENDPOINT_STATUS_OK) {
             return ENDPOINT_STATUS_ERROR;
         }
@@ -1331,7 +1359,7 @@ int endpoint_get_lifetime(const endpoint_t *endpoint, uint32_t *lifetime) {
 #endif
 
     if (!lifetime || !endpoint) {
-        tr_error("endpoint_get_lifetime() invalid params");
+        tr_error("get_lifetime() invalid params");
         assert(0);
         return ENDPOINT_STATUS_ERROR;
     }
@@ -1339,7 +1367,7 @@ int endpoint_get_lifetime(const endpoint_t *endpoint, uint32_t *lifetime) {
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     registry_set_path(&path, M2M_SERVER_ID, 0, SERVER_LIFETIME, 0, REGISTRY_PATH_RESOURCE);
     if (registry_get_value_int(&endpoint->registry, &path, &tmp_lifetime) != REGISTRY_STATUS_OK) {
-        tr_error("endpoint_get_lifetime() reading from registry failed!");
+        tr_error("get_lifetime() reading from registry failed");
         return ENDPOINT_STATUS_ERROR;
     }
     *lifetime = (uint32_t) tmp_lifetime;
@@ -1550,14 +1578,13 @@ static bool is_observable(const registry_path_t *path)
     }
 
     return registry_meta_is_resource_observable(resource_def);
-
 }
 #endif
 
 static int endpoint_build_registration_body(endpoint_t *endpoint, sn_coap_hdr_s *message_ptr, uint8_t updating_registeration, int32_t *len)
 {
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
-    tr_debug("endpoint_build_registration_body");
+    tr_debug("build_registration_body");
     /* Local variables */
     uint8_t *data;
     int32_t data_len;
@@ -1583,7 +1610,7 @@ static int endpoint_build_registration_body(endpoint_t *endpoint, sn_coap_hdr_s 
             return ENDPOINT_STATUS_ERROR;
         }
 
-        tr_debug("endpoint_build_registration_body - body size: [%d]", message_ptr->payload_len);
+        tr_debug("build_registration_body - body size: [%d]", message_ptr->payload_len);
         message_ptr->payload_ptr = lwm2m_alloc(message_ptr->payload_len);
         if (!message_ptr->payload_ptr) {
             return ENDPOINT_STATUS_ERROR;
@@ -1714,7 +1741,7 @@ static int endpoint_build_registration_body(endpoint_t *endpoint, sn_coap_hdr_s 
                 t->next = resources;
             }
             if (ret) {
-                tr_error("endpoint_build_registration_body - out of memory");
+                tr_error("build_registration_body - out of memory");
                 break;
             }
         }
@@ -1755,7 +1782,7 @@ static int endpoint_build_registration_body(endpoint_t *endpoint, sn_coap_hdr_s 
     if (leng < 0 || leng > UINT16_MAX) {
         return ENDPOINT_STATUS_ERROR;
     }
-    tr_debug("endpoint_build_registration_body - body size: [%d]", message_ptr->payload_len);
+    tr_debug("build_registration_body - body size: [%d]", message_ptr->payload_len);
     message_ptr->payload_ptr = lwm2m_alloc(message_ptr->payload_len);
     if (!message_ptr->payload_ptr) {
         return ENDPOINT_STATUS_ERROR;
@@ -1932,18 +1959,14 @@ static void endpoint_print_coap_data(const sn_coap_hdr_s *coap_header_ptr, bool 
         return;
     }
 
-    if (outgoing) {
-        tr_info("======== Outgoing CoAP package ========");
-    } else {
-        tr_info("======== Incoming CoAP package ========");
-    }
+    tr_info("======== %sing CoAP package ========", (outgoing ? "Outgo" : "Incom"));
 
     if (coap_header_ptr->uri_path_len > 0 && coap_header_ptr->uri_path_ptr) {
         tr_info("Uri-Path:\t\t%.*s", coap_header_ptr->uri_path_len, coap_header_ptr->uri_path_ptr);
     }
-    tr_info("Status:\t\t%s", endpoint_coap_status_description(coap_header_ptr->coap_status));
-    tr_info("Code:\t\t%s", endpoint_coap_message_code_desc(coap_header_ptr->msg_code));
-    tr_info("Type:\t\t%s", endpoint_coap_message_type_desc(coap_header_ptr->msg_type));
+    tr_info("Status:\t\tCOAP_STATUS_%s", endpoint_coap_status_description(coap_header_ptr->coap_status));
+    tr_info("Code:\t\tCOAP_MSG_CODE_%s", endpoint_coap_message_code_desc(coap_header_ptr->msg_code));
+    tr_info("Type:\t\tCOAP_MSG_TYPE_%s", endpoint_coap_message_type_desc(coap_header_ptr->msg_type));
     tr_info("Id:\t\t%d", coap_header_ptr->msg_id);
     if (coap_header_ptr->token_ptr && coap_header_ptr->token_len > 0) {
         tr_info("Token:\t\t%s", tr_array(coap_header_ptr->token_ptr, coap_header_ptr->token_len));
@@ -1964,8 +1987,9 @@ static void endpoint_print_coap_data(const sn_coap_hdr_s *coap_header_ptr, bool 
             tr_info("PL:\t\t%s", tr_array( coap_header_ptr->payload_ptr + i, row_len));
             i += row_len;
         }
-        if (i >= max_length)
-            tr_info("PL:\t\t.....");
+        if (i >= max_length) {
+            tr_info("PL:\t\t...");
+        }
     }
 #endif
 
@@ -2032,107 +2056,110 @@ static void endpoint_print_coap_data(const sn_coap_hdr_s *coap_header_ptr, bool 
 }
 
 #if defined(FEA_TRACE_SUPPORT) || MBED_CONF_MBED_TRACE_ENABLE || YOTTA_CFG_MBED_TRACE || (defined(YOTTA_CFG) && !defined(NDEBUG))
+// return human readable mapping of status to sn_coap_status_e, without "COAP_STATUS_" prefix
 static const char *endpoint_coap_status_description(sn_coap_status_e status)
 {
     switch(status) {
         case COAP_STATUS_OK:
-            return "COAP_STATUS_OK";
+            return "OK";
         case COAP_STATUS_PARSER_ERROR_IN_HEADER:
-            return "COAP_STATUS_PARSER_ERROR_IN_HEADER";
+            return "PARSER_ERROR_IN_HEADER";
         case COAP_STATUS_PARSER_DUPLICATED_MSG:
-            return "COAP_STATUS_PARSER_DUPLICATED_MSG";
+            return "PARSER_DUPLICATED_MSG";
         case COAP_STATUS_PARSER_BLOCKWISE_MSG_RECEIVING:
-            return "COAP_STATUS_PARSER_BLOCKWISE_MSG_RECEIVING";
+            return "PARSER_BLOCKWISE_MSG_RECEIVING";
         case COAP_STATUS_PARSER_BLOCKWISE_ACK:
-            return "COAP_STATUS_PARSER_BLOCKWISE_ACK";
+            return "PARSER_BLOCKWISE_ACK";
         case COAP_STATUS_PARSER_BLOCKWISE_MSG_REJECTED:
-            return "COAP_STATUS_PARSER_BLOCKWISE_MSG_REJECTED";
+            return "PARSER_BLOCKWISE_MSG_REJECTED";
         case COAP_STATUS_PARSER_BLOCKWISE_MSG_RECEIVED:
-            return "COAP_STATUS_PARSER_BLOCKWISE_MSG_RECEIVED";
+            return "PARSER_BLOCKWISE_MSG_RECEIVED";
         case COAP_STATUS_BUILDER_MESSAGE_SENDING_FAILED:
-            return "COAP_STATUS_BUILDER_MESSAGE_SENDING_FAILED";
+            return "BUILDER_MESSAGE_SENDING_FAILED";
         default:
-            return "";
+            return "UNKNOWN";
     }
 }
 
+// return human readable mapping of msg_code to sn_coap_msg_code_e, without "COAP_MSG_CODE_" prefix
 static const char *endpoint_coap_message_code_desc(int msg_code)
 {
     switch(msg_code) {
         case COAP_MSG_CODE_EMPTY:
-            return "COAP_MSG_CODE_EMPTY";
+            return "EMPTY";
         case COAP_MSG_CODE_REQUEST_GET:
-            return "COAP_MSG_CODE_REQUEST_GET";
+            return "REQUEST_GET";
         case COAP_MSG_CODE_REQUEST_POST:
-            return "COAP_MSG_CODE_REQUEST_POST";
+            return "REQUEST_POST";
         case COAP_MSG_CODE_REQUEST_PUT:
-            return "COAP_MSG_CODE_REQUEST_PUT";
+            return "REQUEST_PUT";
         case COAP_MSG_CODE_REQUEST_DELETE:
-            return "COAP_MSG_CODE_REQUEST_DELETE";
+            return "REQUEST_DELETE";
         case COAP_MSG_CODE_RESPONSE_CREATED:
-            return "COAP_MSG_CODE_RESPONSE_CREATED";
+            return "RESPONSE_CREATED";
         case COAP_MSG_CODE_RESPONSE_DELETED:
-            return "COAP_MSG_CODE_RESPONSE_DELETED";
+            return "RESPONSE_DELETED";
         case COAP_MSG_CODE_RESPONSE_VALID:
-            return "COAP_MSG_CODE_RESPONSE_VALID";
+            return "RESPONSE_VALID";
         case COAP_MSG_CODE_RESPONSE_CHANGED:
-            return "COAP_MSG_CODE_RESPONSE_CHANGED";
+            return "RESPONSE_CHANGED";
         case COAP_MSG_CODE_RESPONSE_CONTENT:
-            return "COAP_MSG_CODE_RESPONSE_CONTENT";
+            return "RESPONSE_CONTENT";
         case COAP_MSG_CODE_RESPONSE_CONTINUE:
-            return "COAP_MSG_CODE_RESPONSE_CONTINUE";
+            return "RESPONSE_CONTINUE";
         case COAP_MSG_CODE_RESPONSE_BAD_REQUEST:
-            return "COAP_MSG_CODE_RESPONSE_BAD_REQUEST";
+            return "RESPONSE_BAD_REQUEST";
         case COAP_MSG_CODE_RESPONSE_UNAUTHORIZED:
-            return "COAP_MSG_CODE_RESPONSE_UNAUTHORIZED";
+            return "RESPONSE_UNAUTHORIZED";
         case COAP_MSG_CODE_RESPONSE_BAD_OPTION:
-            return "COAP_MSG_CODE_RESPONSE_BAD_OPTION";
+            return "RESPONSE_BAD_OPTION";
         case COAP_MSG_CODE_RESPONSE_FORBIDDEN:
-            return "COAP_MSG_CODE_RESPONSE_FORBIDDEN";
+            return "RESPONSE_FORBIDDEN";
         case COAP_MSG_CODE_RESPONSE_NOT_FOUND:
-            return "COAP_MSG_CODE_RESPONSE_NOT_FOUND";
+            return "RESPONSE_NOT_FOUND";
         case COAP_MSG_CODE_RESPONSE_METHOD_NOT_ALLOWED:
-            return "COAP_MSG_CODE_RESPONSE_METHOD_NOT_ALLOWED";
+            return "RESPONSE_METHOD_NOT_ALLOWED";
         case COAP_MSG_CODE_RESPONSE_NOT_ACCEPTABLE:
-            return "COAP_MSG_CODE_RESPONSE_NOT_ACCEPTABLE";
+            return "RESPONSE_NOT_ACCEPTABLE";
         case COAP_MSG_CODE_RESPONSE_REQUEST_ENTITY_INCOMPLETE:
-            return "COAP_MSG_CODE_RESPONSE_REQUEST_ENTITY_INCOMPLETE";
+            return "RESPONSE_REQUEST_ENTITY_INCOMPLETE";
         case COAP_MSG_CODE_RESPONSE_PRECONDITION_FAILED:
-            return "COAP_MSG_CODE_RESPONSE_PRECONDITION_FAILED";
+            return "RESPONSE_PRECONDITION_FAILED";
         case COAP_MSG_CODE_RESPONSE_REQUEST_ENTITY_TOO_LARGE:
-            return "COAP_MSG_CODE_RESPONSE_REQUEST_ENTITY_TOO_LARGE";
+            return "RESPONSE_REQUEST_ENTITY_TOO_LARGE";
         case COAP_MSG_CODE_RESPONSE_UNSUPPORTED_CONTENT_FORMAT:
-            return "COAP_MSG_CODE_RESPONSE_UNSUPPORTED_CONTENT_FORMAT";
+            return "RESPONSE_UNSUPPORTED_CONTENT_FORMAT";
         case COAP_MSG_CODE_RESPONSE_INTERNAL_SERVER_ERROR:
-            return "COAP_MSG_CODE_RESPONSE_INTERNAL_SERVER_ERROR";
+            return "RESPONSE_INTERNAL_SERVER_ERROR";
         case COAP_MSG_CODE_RESPONSE_NOT_IMPLEMENTED:
-            return "COAP_MSG_CODE_RESPONSE_NOT_IMPLEMENTED";
+            return "RESPONSE_NOT_IMPLEMENTED";
         case COAP_MSG_CODE_RESPONSE_BAD_GATEWAY:
-            return "COAP_MSG_CODE_RESPONSE_BAD_GATEWAY";
+            return "RESPONSE_BAD_GATEWAY";
         case COAP_MSG_CODE_RESPONSE_SERVICE_UNAVAILABLE:
-            return "COAP_MSG_CODE_RESPONSE_SERVICE_UNAVAILABLE";
+            return "RESPONSE_SERVICE_UNAVAILABLE";
         case COAP_MSG_CODE_RESPONSE_GATEWAY_TIMEOUT:
-            return "COAP_MSG_CODE_RESPONSE_GATEWAY_TIMEOUT";
+            return "RESPONSE_GATEWAY_TIMEOUT";
         case COAP_MSG_CODE_RESPONSE_PROXYING_NOT_SUPPORTED:
-            return "COAP_MSG_CODE_RESPONSE_PROXYING_NOT_SUPPORTED";
+            return "RESPONSE_PROXYING_NOT_SUPPORTED";
         default:
-            return "";
+            return "UNKNOWN";
     }
 }
 
+// return human readable mapping of msg_type to sn_coap_msg_type_e, without "COAP_MSG_TYPE_" prefix
 static const char *endpoint_coap_message_type_desc(int msg_type)
 {
     switch(msg_type) {
         case COAP_MSG_TYPE_CONFIRMABLE:
-            return "COAP_MSG_TYPE_CONFIRMABLE";
+            return "CONFIRMABLE";
         case COAP_MSG_TYPE_NON_CONFIRMABLE:
-            return "COAP_MSG_TYPE_NON_CONFIRMABLE";
+            return "NON_CONFIRMABLE";
         case COAP_MSG_TYPE_ACKNOWLEDGEMENT:
-            return "COAP_MSG_TYPE_ACKNOWLEDGEMENT";
+            return "ACKNOWLEDGEMENT";
         case COAP_MSG_TYPE_RESET:
-            return "COAP_MSG_TYPE_RESET";
+            return "RESET";
         default:
-            return "";
+            return "UNKNOWN";
     }
 }
 #endif
@@ -2262,17 +2289,19 @@ unsigned int endpoint_last_message_sent(const endpoint_t *endpoint)
 
 bool endpoint_set_uri_query_parameters(endpoint_t *endpoint, const char *uri_query_params)
 {
-    tr_debug("endpoint_set_uri_query_parameters");
+    tr_debug("set_uri_query_parameters");
+
+    assert(endpoint);
+    assert(uri_query_params);
+
     size_t query_len = strlens(uri_query_params);
     size_t current_len = strlens(endpoint->custom_uri_query_params);
     size_t new_size = query_len + current_len;
 
-    if (uri_query_params == NULL ||
-        endpoint == NULL ||
-        query_len == 0 ||
+    if (query_len == 0 ||
         query_len > MAX_ALLOWED_STRING_LENGTH ||
         new_size > MAX_ALLOWED_STRING_LENGTH) {
-        tr_error("endpoint_set_uri_query_parameters - invalid params!");
+        tr_error("set_uri_query_parameters - invalid size");
         return false;
     }
 
@@ -2304,7 +2333,7 @@ bool endpoint_set_uri_query_parameters(endpoint_t *endpoint, const char *uri_que
         endpoint->custom_uri_query_params[query_len] = '\0';
     }
 
-    tr_info("endpoint_set_uri_query_parameters - custom string %s", endpoint->custom_uri_query_params);
+    tr_info("set_uri_query_parameters - custom string %s", endpoint->custom_uri_query_params);
     return true;
 }
 
@@ -2315,7 +2344,7 @@ static void endpoint_request_coap_ping(endpoint_t *endpoint)
     // Send only in TCP mode
     if (endpoint->mode != BINDING_MODE_T ||
         MBED_CLIENT_TCP_KEEPALIVE_INTERVAL == 0 ||
-        endpoint->coap_time != endpoint->next_coap_ping_send_time ||
+        endpoint->coap_time < endpoint->next_coap_ping_send_time ||
         endpoint->coap_ping_id) {
         return;
     }
@@ -2340,7 +2369,7 @@ void endpoint_send_coap_ping(endpoint_t *endpoint)
 
     /* Send message */
     if (ENDPOINT_STATUS_OK != endpoint_send_coap_message(endpoint, NULL, &coap_ping)) {
-        tr_error("endpoint_send_coap_ping - endpoint_send_coap_message failed!");
+        tr_error("send_coap_ping - endpoint_send_coap_message failed");
         endpoint_send_event(endpoint, ENDPOINT_EVENT_ERROR_REREGISTER, ENDPOINT_EVENT_STATUS_NO_MEMORY);
         send_queue_sent(endpoint, true);
     } else {
@@ -2358,10 +2387,10 @@ static void calculate_new_coap_ping_send_time(endpoint_t *endpoint)
 static bool endpoint_command(endpoint_t *endpoint, unsigned message_type)
 {
     if (endpoint->message_type != ENDPOINT_MSG_UNDEFINED) {
-        tr_warn("endpoint_command(), %d in progress.", endpoint->message_type);
+        tr_warn("command %d in progress", endpoint->message_type);
         return ENDPOINT_STATUS_ERROR;
     }
-    tr_info("endpoint_command()");
+    tr_info("command");
     endpoint->message_type = message_type;
     send_queue_request(endpoint, SEND_QUEUE_ENDPOINT);
     return ENDPOINT_STATUS_OK;
@@ -2376,6 +2405,12 @@ void endpoint_stop_coap_exec_timer(endpoint_t *endpoint)
 void endpoint_start_coap_exec_timer(endpoint_t *endpoint)
 {
     endpoint_stop_coap_exec_timer(endpoint);
+    endpoint->old_tick = eventOS_event_timer_ticks();
+    // To reduce the effect of jitter remainder is originally initialized to 50.
+    // Time is incremented if remainder is in range 50-150, i.e. "in the middle of a second".
+    // This allows up to 0.5s jitter before gaps or clumping in the tick values coap library sees.
+    endpoint->tick_remainder = 50;
+
     endpoint->coap_timeout = eventOS_timeout_every_ms(&endpoint_coap_timer, 1000, endpoint);
 }
 
@@ -2476,7 +2511,7 @@ uint8_t* write_resource_value(uint8_t *packet, const registry_path_t *path, int3
                                                      packet_len);
 
                         } else {
-                            tr_error("write_resource_value - error in Base64 encoding error %d or olen is 0", ret_val);
+                            tr_error("write_resource_value - Base64 encoding err: %d, olen: %lu", ret_val, (unsigned long)olen);
                         }
                         lwm2m_free(dst);
                     }
@@ -2629,7 +2664,7 @@ register_resource_t *endpoint_create_register_resource_opaque(endpoint_t *endpoi
     dst_size = (((len + 2) / 3) << 2) + 1;
     dst = (uint8_t*) lwm2m_alloc(dst_size);
     if (!dst) {
-        tr_error("endpoint_create_register_resource_opaque - failed to allocate buffer");
+        tr_error("create_register_resource_opaque - failed to allocate buffer");
         return NULL;
     }
 
@@ -2638,7 +2673,7 @@ register_resource_t *endpoint_create_register_resource_opaque(endpoint_t *endpoi
     if (ret == 0 && olen > 0) {
         res = endpoint_create_register_resource_str(endpoint, id, auto_obs, dst, olen);
     } else {
-        tr_error("endpoint_create_register_resource_opaque - error in Base64 encoding. Error %d or olen is 0", ret);
+        tr_error("create_register_resource_opaque - Base64 encoding err: %d, olen: %d", ret, olen);
         res = NULL;
     }
     lwm2m_free(dst);
@@ -2681,16 +2716,21 @@ registry_callback_t endpoint_get_object_callback(endpoint_t *endpoint, uint16_t 
     return NULL;
 }
 
-int endpoint_send_notification_int(endpoint_t *endpoint, uint16_t object_id, uint16_t aobs_id, int64_t value)
+int endpoint_send_notification_int(endpoint_t *endpoint, registry_path_t *path, uint16_t aobs_id, int64_t value)
 {
     int ret = -1;
     uint16_t token;
     uint8_t int_buf[REGISTRY_INT64_STRING_MAX_LEN];
     size_t len = sizeof(int_buf);
 
-    tr_debug("endpoint_send_notification(), object id: %d", object_id);
+    tr_debug("send_notification(), object id: %d, resource id %d", path->object_id, path->resource_id);
 
     assert(endpoint);
+    assert(path);
+
+    if (!endpoint->registered) {
+        return NOTIFICATION_STATUS_NOT_REGISTERED;
+    }
 
     if (endpoint->notifier.notifying) {
         tr_debug("a notification is already pending");
@@ -2704,7 +2744,7 @@ int endpoint_send_notification_int(endpoint_t *endpoint, uint16_t object_id, uin
 
     ret = notifier_send_observation_notification(endpoint, endpoint->lifetime, (uint8_t*)&token, sizeof(token), int_buf, len, COAP_CT_TEXT_PLAIN);
     if (ret == NOTIFICATION_STATUS_SENT) {
-        endpoint->notifier.last_notified = object_id;
+        endpoint->notifier.last_notified = *path;
         endpoint->notifier.notifying = true;
     }
 

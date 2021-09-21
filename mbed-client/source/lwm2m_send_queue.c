@@ -73,7 +73,9 @@ void send_queue_sent(struct endpoint_s *endpoint, const bool confirmable)
         delay = SEND_QUEUE_DELAY_NON_CONFIRMABLE_MS;
     }
 
-    if ( (endpoint->send_queue.timeout = eventOS_timeout_ms(&timed_send_next, delay, endpoint)) ) {
+    endpoint->send_queue.timeout = eventOS_timeout_ms(&timed_send_next, delay, endpoint);
+
+    if (endpoint->send_queue.timeout) {
         tr_debug("send_queue_sent() use %d ms delay", delay);
         return;
     }

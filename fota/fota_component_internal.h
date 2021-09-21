@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2020 ARM Ltd.
+// Copyright 2019-2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -21,7 +21,7 @@
 
 #include "fota/fota_base.h"
 
-#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+#if defined(MBED_CLOUD_CLIENT_FOTA_ENABLE)
 
 #include "fota/fota_component.h"
 
@@ -47,10 +47,12 @@ int fota_component_name_to_id(const char *name, unsigned int *comp_id);
 // Semantic version translation
 int fota_component_version_semver_to_int(const char *sem_ver, fota_component_version_t *version);
 
+bool fota_component_is_internal_component(unsigned int comp_id);
+
 #ifdef __cplusplus
 }
 #endif
 
-#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
+#endif // defined(MBED_CLOUD_CLIENT_FOTA_ENABLE)
 
 #endif // __FOTA_COMPONENT_INTERNAL_H_

@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2020 ARM Ltd.
+// Copyright 2019-2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -20,14 +20,14 @@
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
 
+#if defined(__MBED__)
+
 #define TRACE_GROUP "FOTA"
 
 #include "fota/fota_curr_fw.h"
 #include "fota/fota_status.h"
 #include <stdio.h>
 
-#if !defined(FOTA_CUSTOM_CURR_FW_STRUCTURE) || (!FOTA_CUSTOM_CURR_FW_STRUCTURE)
-#if defined(__MBED__)
 // Bootloader and application have different defines
 #if !defined(APPLICATION_ADDR)
 #if defined(MBED_CONF_MBED_BOOTLOADER_APPLICATION_START_ADDRESS)
@@ -49,9 +49,7 @@
 #endif
 #endif  // !defined(HEADER_ADDR)
 
-
-// The following two functions should be overridden in the non mbed-os cases.
-uint8_t *fota_curr_fw_get_app_start_addr(void)
+static uint8_t *fota_curr_fw_get_app_start_addr(void)
 {
 #ifdef APPLICATION_ADDR
     return (uint8_t *) APPLICATION_ADDR;
@@ -62,7 +60,7 @@ uint8_t *fota_curr_fw_get_app_start_addr(void)
 #endif
 }
 
-uint8_t *fota_curr_fw_get_app_header_addr(void)
+static uint8_t *fota_curr_fw_get_app_header_addr(void)
 {
 #ifdef HEADER_ADDR
     return (uint8_t *) HEADER_ADDR;
@@ -72,7 +70,12 @@ uint8_t *fota_curr_fw_get_app_header_addr(void)
     return NULL;
 #endif
 }
-#endif // defined(__MBED__)
+
+int fota_curr_fw_read_header(fota_header_info_t *header_info)
+{
+    uint8_t *header_in_curr_fw = (uint8_t *)fota_curr_fw_get_app_header_addr();
+    return fota_deserialize_header(header_in_curr_fw, fota_get_header_size(), header_info);
+}
 
 int fota_curr_fw_read(uint8_t *buf, size_t offset, size_t size, size_t *num_read)
 {
@@ -110,6 +113,6 @@ int fota_curr_fw_get_digest(uint8_t *buf)
     return FOTA_STATUS_SUCCESS;
 }
 
-#endif // !defined(FOTA_CUSTOM_CURR_FW_STRUCTURE) || (!FOTA_CUSTOM_CURR_FW_STRUCTURE)
+#endif // defined(__MBED__)
 
 #endif  // MBED_CLOUD_CLIENT_FOTA_ENABLE

@@ -14,18 +14,22 @@
  * limitations under the License.
  */
 
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-#include <assert.h>
 #include "est_defs.h"
 #include "dmc_connect_api.h"
 #include "lwm2m_req_handler.h"
 #include "common_functions.h"
 
+#include <assert.h>
+#include <limits.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+
 #ifdef MBED_CLIENT_DISABLE_EST_FEATURE
 #undef MBED_CLIENT_DISABLE_EST_FEATURE // I need the prototypes anyway
 #endif
+
 #include "lwm2m_est_client.h"
 
 /**
@@ -127,12 +131,17 @@ static char* make_est_uri(const char *cert_name)
         char *uri = NULL;
         size_t uri_len = 0;
         size_t name_len = strlen(cert_name);
-        // User certificate
-        uri_len = snprintf(NULL, 0, EST_SEN_URI_FORMAT, name_len, cert_name);
-        uri_len++; // For null terminator
-        uri = calloc(uri_len, sizeof(char));
-        if (uri != NULL) {
-            snprintf(uri, uri_len, EST_SEN_URI_FORMAT, name_len, cert_name);
+
+        // The ".*s" needs a int argument, which likely has smaller max value than size_t, so let's check
+        // value before casting to avoid theoretical integer wrapping and undefined behavior in snprintf().
+        if (name_len <= INT_MAX) {
+            // User certificate
+            uri_len = snprintf(NULL, 0, EST_SEN_URI_FORMAT, (int)name_len, cert_name);
+            uri_len++; // For null terminator
+            uri = calloc(uri_len, sizeof(char));
+            if (uri != NULL) {
+                (void)snprintf(uri, uri_len, EST_SEN_URI_FORMAT, (int)name_len, cert_name);
+            }
         }
         return uri;
     }

@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2020 ARM Ltd.
+// Copyright 2019-2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -19,7 +19,7 @@
 #include "fota/fota_base.h"
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
-#if (MBED_CLOUD_CLIENT_PROFILE == MBED_CLOUD_CLIENT_PROFILE_LITE)
+#if (MBED_CLOUD_CLIENT_PROFILE == MBED_CLOUD_CLIENT_PROFILE_LITE) || defined(FOTA_UNIT_TEST)
 
 #define TRACE_GROUP "FOTA"
 
@@ -28,33 +28,40 @@
 #include "fota/fota_crypto_defs.h"
 #include "fota/fota_status.h"
 #include "fota/fota_internal.h"
+#include "fota/fota.h"
 #include "fota/fota_event_handler.h"
 #include "fota/fota_component_defs.h"
+#include <inttypes.h>
 #ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 #include "fota/fota_nvm.h"
 #endif
 
+#if (MBED_CLOUD_CLIENT_PROFILE == MBED_CLOUD_CLIENT_PROFILE_LITE)
 #include "mbed-client/lwm2m_endpoint.h"
 #include "mbed-client/lwm2m_req_handler.h"
 #include "device-management-client/lwm2m_registry_handler.h"
+#else
+#include "mbed-client/test/fota/unittest/common/fota_lwm2m_get_req_sim.h"
+#endif
 
 #include <stdlib.h>
+
+#define DEFAULT_INT_VAL -1
 
 static endpoint_t *endpoint = 0;
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static registry_t *registry;
-
-const int64_t default_int_val = -1;
 #endif
-
 
 static bool initialized = false;
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static report_sent_callback_t g_on_sent_callback = NULL;
 static report_sent_callback_t g_on_failure_callback = NULL;
+static bool auto_observable_reporting_enabled;
 #else
 static const char *manifest_res_id = "/10252/0/1";
 static const char *state_res_id = "/10252/0/2";
+static const char *update_result_res_id = "/10252/0/3";
 static const char *protocol_version_res_id = "/10255/0/0";
 static const char *vendor_id_res_id = "/10255/0/3";
 static const char *class_id_res_id = "/10255/0/4";
@@ -68,6 +75,12 @@ static uint32_t fota_class_id_size;
 static char main_comp_name[FOTA_COMPONENT_MAX_NAME_SIZE];
 static char main_comp_sem_ver[FOTA_COMPONENT_MAX_SEMVER_STR_SIZE];
 static int fota_state;
+// Value for this resource crosses the init/deinit calls (so it can be resent in
+// reg message after failures), hence initialized here.
+static int fota_update_result = DEFAULT_INT_VAL;
+
+static uint16_t update_result_aobs_id;
+
 #endif
 
 static registry_path_t execute_path = { 0 };
@@ -111,6 +124,24 @@ static registry_status_t got_manifest_callback(registry_callback_type_t type,
 #endif
                                               )
 {
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    if (path->resource_id == FOTA_SOURCE_UPDATE_RESULT_RESOURCE_ID) {
+        if (status == NOTIFICATION_STATUS_DELIVERED) {
+            // Reset current value of update result (default value is ignored)
+            fota_update_result = DEFAULT_INT_VAL;
+            return REGISTRY_STATUS_OK;
+        }
+        // keep current value of update result for possible later sending,
+        // return an arbitrary failure (not checked anyway by upper level)
+        return REGISTRY_STATUS_NO_MEMORY;
+    }
+    // Ignore this for all other resources (non manifest or update result)
+    if (path->resource_id != FOTA_SOURCE_PACKAGE_RESOURCE_ID) {
+        // Return success - error code is ignored for these cases anyway
+        return REGISTRY_STATUS_OK;
+    }
+#endif
+
     registry_status_t callback_status = REGISTRY_STATUS_OK;
     sn_coap_msg_code_e response = COAP_MSG_CODE_RESPONSE_CHANGED;
     fota_state_e fota_state;
@@ -130,7 +161,7 @@ static registry_status_t got_manifest_callback(registry_callback_type_t type,
 
             registry_set_path(&res_path, FOTA_SOURCE_PACKAGE_OBJECT_ID, 0, FOTA_SOURCE_STATE_RESOURCE_ID,
                               0, REGISTRY_PATH_RESOURCE);
-            if (REGISTRY_STATUS_OK != registry_set_value_int(registry, &res_path, default_int_val)) {
+            if (REGISTRY_STATUS_OK != registry_set_value_int(registry, &res_path, DEFAULT_INT_VAL)) {
                 FOTA_DBG_ASSERT(!"registry_set_value_int failed");
             }
 
@@ -139,6 +170,8 @@ static registry_status_t got_manifest_callback(registry_callback_type_t type,
             if (REGISTRY_STATUS_OK != registry_set_value_empty(registry, &res_path, true)) {
                 FOTA_DBG_ASSERT(!"registry_set_value_empty failed");
             }
+#else
+            fota_update_result = DEFAULT_INT_VAL;
 #endif
 
             memcpy(&execute_token, token, sizeof(execute_token));
@@ -274,6 +307,15 @@ static int get_fota_resources(endpoint_t *endpoint, register_resource_t **res)
     if (!curr) {
         return -1;
     }
+
+    curr->next = endpoint_create_register_resource_int(endpoint, update_result_res_id, true, fota_update_result);
+    curr = curr->next;
+    if (!curr) {
+        return -1;
+    }
+
+    // Need to save this for later for dynamic reporting of update result
+    update_result_aobs_id = curr->aobs_id;
 
     curr->next = endpoint_create_register_resource_int(endpoint, protocol_version_res_id, true, FOTA_MCCP_PROTOCOL_VERSION);
     curr = curr->next;
@@ -426,8 +468,9 @@ int fota_source_init(
     // Create update result resource /10252/0/3
     registry_set_path(&path, FOTA_SOURCE_PACKAGE_OBJECT_ID, 0, FOTA_SOURCE_UPDATE_RESULT_RESOURCE_ID,
                       0, REGISTRY_PATH_RESOURCE);
-    if (REGISTRY_STATUS_OK != registry_set_value_int(registry, &path, default_int_val) ||
-            REGISTRY_STATUS_OK != registry_set_auto_observable_parameter(registry, &path, true)) {
+    if (REGISTRY_STATUS_OK != registry_set_value_int(registry, &path, DEFAULT_INT_VAL) ||
+            REGISTRY_STATUS_OK != registry_set_auto_observable_parameter(registry, &path, true) ||
+            REGISTRY_STATUS_OK != registry_set_resource_value_to_reg_msg(registry, &path, true)) {
         goto fail;
     }
 
@@ -436,7 +479,6 @@ int fota_source_init(
     registry_set_path(&path, FOTA_SOURCE_UPDATE_OBJECT_ID, 0, FOTA_SOURCE_PROTOCOL_SUPP_RESOURCE_ID,
                       0, REGISTRY_PATH_RESOURCE);
     if (REGISTRY_STATUS_OK != registry_set_value_int(registry, &path, FOTA_MCCP_PROTOCOL_VERSION) ||
-            REGISTRY_STATUS_OK != registry_set_auto_observable_parameter(registry, &path, true) ||
             REGISTRY_STATUS_OK != registry_set_resource_value_to_reg_msg(registry, &path, true)) {
         goto fail;
     }
@@ -446,7 +488,6 @@ int fota_source_init(
                       0, REGISTRY_PATH_RESOURCE);
     if (REGISTRY_STATUS_OK != registry_set_value_opaque_copy(registry, &path, vendor_id,
                                                              vendor_id_size) ||
-            REGISTRY_STATUS_OK != registry_set_auto_observable_parameter(registry, &path, true) ||
             REGISTRY_STATUS_OK != registry_set_resource_value_to_reg_msg(registry, &path, true)) {
         goto fail;
     }
@@ -456,10 +497,11 @@ int fota_source_init(
                       0, REGISTRY_PATH_RESOURCE);
     if (REGISTRY_STATUS_OK != registry_set_value_opaque_copy(registry, &path, class_id,
                                                              class_id_size) ||
-            REGISTRY_STATUS_OK != registry_set_auto_observable_parameter(registry, &path, true) ||
             REGISTRY_STATUS_OK != registry_set_resource_value_to_reg_msg(registry, &path, true)) {
         goto fail;
     }
+
+    fota_source_enable_auto_observable_resources_reporting(true);
 
 #if (FOTA_SOURCE_LEGACY_OBJECTS_REPORT == 1)
     // Create package name resource /10252/0/5
@@ -470,10 +512,12 @@ int fota_source_init(
     registry_set_path(&path, FOTA_SOURCE_PACKAGE_OBJECT_ID, 0, FOTA_SOURCE_PKG_NAME_RESOURCE_ID,
                       0, REGISTRY_PATH_RESOURCE);
     if (REGISTRY_STATUS_OK != registry_set_value_string_copy(registry, &path, str_digest, FOTA_CRYPTO_HASH_SIZE * 2) ||
-            REGISTRY_STATUS_OK != registry_set_auto_observable_parameter(registry, &path, false) ||
             REGISTRY_STATUS_OK != registry_set_resource_value_to_reg_msg(registry, &path, true)) {
         goto fail;
     }
+#endif
+
+#if (FOTA_SOURCE_LEGACY_OBJECTS_REPORT == 1 || MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION < 3)
 
     // Create package version resource /10252/0/6
     FOTA_TRACE_DEBUG("Announcing version is %" PRIu64, curr_fw_version);
@@ -481,11 +525,11 @@ int fota_source_init(
                       0, REGISTRY_PATH_RESOURCE);
 
     if (REGISTRY_STATUS_OK != registry_set_value_int(registry, &path, curr_fw_version) ||
-            REGISTRY_STATUS_OK != registry_set_auto_observable_parameter(registry, &path, false) ||
             REGISTRY_STATUS_OK != registry_set_resource_value_to_reg_msg(registry, &path, true)) {
         goto fail;
     }
 #endif
+
 #else // MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     memcpy(fota_vendor_id, vendor_id, vendor_id_size);
     fota_vendor_id_size = vendor_id_size;
@@ -524,7 +568,6 @@ int fota_source_add_component(unsigned int comp_id, const char *name, const char
     registry_set_path(&path, FOTA_SOURCE_SW_COMPONENT_OBJECT_ID, comp_id, FOTA_SOURCE_COMP_NAME_RESOURCE_ID,
                       0, REGISTRY_PATH_RESOURCE);
     if (REGISTRY_STATUS_OK != registry_set_value_string_copy(registry, &path, (uint8_t *) name, strlen(name) + 1) ||
-            REGISTRY_STATUS_OK != registry_set_auto_observable_parameter(registry, &path, true) ||
             REGISTRY_STATUS_OK != registry_set_resource_value_to_reg_msg(registry, &path, true)) {
         return FOTA_STATUS_INTERNAL_ERROR;
     }
@@ -533,7 +576,6 @@ int fota_source_add_component(unsigned int comp_id, const char *name, const char
     registry_set_path(&path, FOTA_SOURCE_SW_COMPONENT_OBJECT_ID, comp_id, FOTA_SOURCE_COMP_VERSION_RESOURCE_ID,
                       0, REGISTRY_PATH_RESOURCE);
     if (REGISTRY_STATUS_OK != registry_set_value_string_copy(registry, &path, (uint8_t *) sem_ver, strlen(sem_ver) + 1) ||
-            REGISTRY_STATUS_OK != registry_set_auto_observable_parameter(registry, &path, true) ||
             REGISTRY_STATUS_OK != registry_set_resource_value_to_reg_msg(registry, &path, true)) {
         return FOTA_STATUS_INTERNAL_ERROR;
     }
@@ -569,8 +611,16 @@ int fota_source_deinit(void)
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
 static int report_int(int value, int16_t resource_id, report_sent_callback_t on_sent, report_sent_callback_t on_failure)
 {
-    FOTA_DBG_ASSERT(!g_on_sent_callback);
-    FOTA_DBG_ASSERT(!g_on_failure_callback);
+    // Auto observable resources reporting not enabled - call the on sent callback ourselves here
+    if (!auto_observable_reporting_enabled) {
+        if (on_sent) {
+            on_sent();
+        }
+        return FOTA_STATUS_SUCCESS;
+    }
+
+    FOTA_DBG_ASSERT(!(on_sent && g_on_sent_callback));
+    FOTA_DBG_ASSERT(!(on_failure && g_on_failure_callback));
 
     // must assign values before calling registry_set_value_int because of special way unit-tests are implemented
     g_on_sent_callback = on_sent;
@@ -609,7 +659,12 @@ int fota_source_report_update_result(int result)
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
     return report_int(result, FOTA_SOURCE_UPDATE_RESULT_RESOURCE_ID, NULL, NULL);  // 10252/0/3
 #else
-    // result isn't actually being reported, so just pretend it was successful
+    fota_update_result = result;
+    registry_path_t path = {FOTA_SOURCE_PACKAGE_OBJECT_ID, 0, FOTA_SOURCE_UPDATE_RESULT_RESOURCE_ID, 0, REGISTRY_PATH_RESOURCE};
+    int ret = endpoint_send_notification_int(endpoint, &path, update_result_aobs_id, result);
+    if (ret != NOTIFICATION_STATUS_SENT) {
+        return FOTA_STATUS_INTERNAL_ERROR;
+    }
     return FOTA_STATUS_SUCCESS;
 #endif
 }
@@ -658,5 +713,13 @@ int fota_source_firmware_request_fragment(const char *uri, size_t offset)
 
     return FOTA_STATUS_SUCCESS;
 }
+
+void fota_source_enable_auto_observable_resources_reporting(bool enable)
+{
+#ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    auto_observable_reporting_enabled = enable;
+#endif
+}
+
 #endif  // (MBED_CLOUD_CLIENT_PROFILE == MBED_CLOUD_CLIENT_PROFILE_LITE)
 #endif  // MBED_CLOUD_CLIENT_FOTA_ENABLE

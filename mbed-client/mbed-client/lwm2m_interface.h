@@ -36,7 +36,12 @@ extern "C" {
 
 #define MAX_RECONNECT_ATTEMPT   2 ///< Number of reconnection attempts before giving an error to upper layers.
 
+// PDMC_CONNECT_STARTUP_EVENT_TYPE event type used when creating event handler.
+// 0xFF is safe to use. In error event lwm2m_interface_error_t values are used as event type and those start from 0->.
+#define PDMC_CONNECT_STARTUP_EVENT_TYPE 0xFF 
+
 #ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
+
 /**
  * \brief Callback function definition.
  *
@@ -164,10 +169,11 @@ typedef enum {
  * \brief Reconnection state.
  */
 typedef enum {
-    LWM2M_INTERFACE_RECONNECTION_STATE_NONE, ///< Not reconnecting
-    LWM2M_INTERFACE_RECONNECTION_STATE_WITH_UPDATE, ///< Reconnecting using update register.
+    LWM2M_INTERFACE_RECONNECTION_STATE_NONE,              ///< Not reconnecting
+    LWM2M_INTERFACE_RECONNECTION_STATE_WITH_UPDATE,       ///< Reconnecting using update register.
     LWM2M_INTERFACE_RECONNECTION_STATE_FULL_REGISTRATION, ///< Reconnecting with full register.
-    LWM2M_INTERFACE_RECONNECTION_STATE_UNREGISTRATION ///< Try to reconnect to unregister.
+    LWM2M_INTERFACE_RECONNECTION_STATE_UNREGISTRATION,    ///< Try to reconnect to unregister.
+    LWM2M_INTERFACE_RECONNECTION_STATE_CLIENT_PING        ///< Ping for testing network connection
 } lwm2m_interface_reconnection_state_t;
 
 /**
@@ -504,6 +510,15 @@ bool lwm2m_interface_queue_mode(const lwm2m_interface_t *interface);
  * \return false Update register could not be started.
  */
 bool lwm2m_interface_send_update_registration(lwm2m_interface_t *interface);
+
+/**
+ * \brief Internal test function. Set CID for current tls session.
+ * 
+ * \param interface Context structure.
+ * \param data_ptr CID
+ * \param data_len length of the CID
+ */
+void lwm2m_interface_set_cid_value(lwm2m_interface_t *interface, const uint8_t *data_ptr, const size_t data_len);
 
 #ifdef __cplusplus
 }

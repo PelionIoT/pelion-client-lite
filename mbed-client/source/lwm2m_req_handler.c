@@ -80,7 +80,7 @@ void req_handler_send_data_request(endpoint_t *endpoint,
                                        uint8_t *payload,
                                        uint16_t payload_len)
 {
-    tr_debug("req_handler_send_data_request - uri: %s, offset: %lu", uri, (unsigned long)offset);
+    tr_debug("send_data_request - uri: %s, offset: %lu", uri, (unsigned long)offset);
 
     get_data_request_t *data_request = NULL;
 
@@ -174,7 +174,7 @@ void req_handler_send_message(endpoint_t *endpoint)
     req_message.options_list_ptr = NULL;
 
     if (sn_coap_parser_alloc_options(endpoint->coap, &req_message) == NULL) {
-        tr_error("req_handler_send_message - sn_coap_parser_alloc_options Allocation failed, return retry later");
+        tr_error("send_message - sn_coap_parser_alloc_options failed, return retry later");
         endpoint->coap->sn_coap_protocol_free(req_message.options_list_ptr);
         send_queue_sent(endpoint, true);
         return;
@@ -266,7 +266,7 @@ bool req_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap
         return false;
     }
 
-    tr_debug("req_handler_handle_response - msg code %d", coap_header->msg_code);
+    tr_debug("handle_response - msg code %d", coap_header->msg_code);
 
     send_queue_sent(endpoint, true);
 
@@ -337,7 +337,7 @@ bool req_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap
             return true;
 
         } else if (coap_header->msg_code == COAP_MSG_CODE_RESPONSE_SERVICE_UNAVAILABLE) {
-            tr_debug("req_handler_handle_response - msg code COAP_MSG_CODE_RESPONSE_SERVICE_UNAVAILABLE");
+            tr_debug("handle_response - RESPONSE_SERVICE_UNAVAILABLE");
             bool retry = true;
 
             if (!download_retry_time) {
@@ -347,7 +347,7 @@ bool req_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap
                 download_retry_time *= 2;
 
                 if (download_retry_time > MAX_RECONNECT_TIMEOUT) {
-                    tr_error("req_handler_handle_response - file download failed, retry completed");
+                    tr_error("handle_response - file download failed, retry completed");
                     req_handler_free_request_list(coap_header, true, FAILED_TO_SEND_MSG);
                     retry = false;
                 }
@@ -355,11 +355,11 @@ bool req_handler_handle_response(endpoint_t *endpoint, const sn_coap_hdr_s *coap
 
             if (retry) {
                 if (eventOS_timeout_ms(timer_cb, download_retry_time * 1000, (void*)endpoint) == NULL) {
-                    tr_error("req_handler_handle_response - failed to create a timer");
+                    tr_error("handle_response - failed to create a timer");
                     req_handler_free_request_list(coap_header, true, FAILED_TO_SEND_MSG);
                 } else {
                     get_data_req->resend = true;
-                    tr_debug("req_handler_handle_response - continue file download after % "PRId32" (s)", download_retry_time);
+                    tr_debug("handle_response - continue file download after %" PRId32 "s", download_retry_time);
                 }
             }
 

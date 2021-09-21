@@ -28,7 +28,7 @@
 #include "randLIB.h"
 
 #ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
-#include "fota/fota_app_ifs.h"
+#include "fota/fota_internal_ifs.h"
 #endif
 
 // Needed for PRIu64 on FreeRTOS
@@ -94,6 +94,9 @@ static void lwm2m_interface_bootstrap_wait(lwm2m_interface_t *interface);
 static void lwm2m_interface_client_registered(lwm2m_interface_t *interface);
 static void lwm2m_interface_registration_updated(lwm2m_interface_t *interface);
 static void lwm2m_interface_client_unregistered(lwm2m_interface_t *interface);
+#if defined (MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP)
+static void lwm2m_interface_client_ping(lwm2m_interface_t *interface);
+#endif
 static void lwm2m_interface_connection_handler(lwm2m_interface_t *interface, lwm2m_interface_error_t error_code);
 static void lwm2m_interface_registration_error(lwm2m_interface_t *interface, lwm2m_interface_error_t error_code);
 static void lwm2m_interface_state_bootstrap_or_register(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data, bool bootstrap);
@@ -296,7 +299,7 @@ enum {
 static void lwm2m_interface_event_handler(arm_event_t *event)
 {
     lwm2m_interface_t *interface = (lwm2m_interface_t*)event->data_ptr;
-    tr_info("lwm2m_interface_event_handler() event id: %" PRId8 " event_type: %" PRId8, event->event_id, event->event_type);
+    tr_info("event_handler() event id: %" PRId8 " event_type: %" PRId8, event->event_id, event->event_type);
 
     if (event->event_id == ENDPOINT_EVENT_ID) {
         lwm2m_interface_endpoint_event_handler(event);
@@ -305,11 +308,11 @@ static void lwm2m_interface_event_handler(arm_event_t *event)
     } else if (event->event_id == LWM2M_INTERFACE_EXTERNAL_EVENT) {
         lwm2m_interface_internal_event(interface, (uint8_t) event->event_data, &interface->external_event_data);
     } else if (event->event_id == CONNECTION_EVENT_ID) {
-        lwm2m_interface_connection_event_handler(event->event_type, interface, event->event_data);
+        lwm2m_interface_connection_event_handler((connection_event_t)event->event_type, interface, event->event_data);
     } else if (event->event_type == LWM2M_INTERFACE_EVENT_INIT) {
         // No need to do anything here.
     } else {
-        tr_debug("lwm2m_interface_event_handler() unknown event id");
+        tr_debug("event_handler() unknown event id");
     }
 }
 
@@ -431,7 +434,7 @@ static void lwm2m_interface_connection_event_handler(connection_event_t event, v
 
         case CONNECTION_EVENT_DATA:
             if (CONNECTION_STATUS_OK != connection_read_data(&interface->connection, &data, &data_len, (uint8_t **) &address.address, &address.length, &address.port)) {
-                tr_warn("connection_event_handler connection_read_data failed.");
+                tr_warn("connection_event_handler connection_read_data failed");
                 return;
             }
             address.stack = address.length == 4 ? LWM2M_INTERFACE_NETWORK_STACK_LWIP_IPV4 : LWM2M_INTERFACE_NETWORK_STACK_LWIP_IPV6;
@@ -442,14 +445,14 @@ static void lwm2m_interface_connection_event_handler(connection_event_t event, v
 
 #ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
             if (!lwm2m_interface_is_bootstrap_done(interface)) {
-                tr_info("connection_event_handler - STATE_BOOTSTRAP_ADDRESS_RESOLVED.");
+                tr_info("connection_event_handler - STATE_BOOTSTRAP_ADDRESS_RESOLVED");
                 lwm2m_interface_internal_event(interface, STATE_BOOTSTRAP_ADDRESS_RESOLVED, NULL);
             } else {
-                tr_info("connection_event_handler - STATE_REGISTER_ADDRESS_RESOLVED.");
+                tr_info("connection_event_handler - STATE_REGISTER_ADDRESS_RESOLVED");
                 lwm2m_interface_internal_event(interface, STATE_REGISTER_ADDRESS_RESOLVED, NULL);
             }
 #else
-            tr_info("connection_event_handler - STATE_REGISTER_ADDRESS_RESOLVED.");
+            tr_info("connection_event_handler - STATE_REGISTER_ADDRESS_RESOLVED");
             lwm2m_interface_internal_event(interface, STATE_REGISTER_ADDRESS_RESOLVED, NULL);
 #endif // MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
             break;
@@ -459,7 +462,7 @@ static void lwm2m_interface_connection_event_handler(connection_event_t event, v
             tr_info("CONNECTION_EVENT_DISCONNECTED");
 #ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
             if (lwm2m_interface_is_bootstrap_waiting(interface)) {
-                tr_info("connection_event_handler - CONNECTION_EVENT_DISCONNECTED.");
+                tr_info("connection_event_handler - CONNECTION_EVENT_DISCONNECTED");
                 lwm2m_interface_bootstrap_done(interface);
             } else {
                 lwm2m_interface_connection_handler(interface, lwm2m_interface_convert_protoman_to_client_error(error_code));
@@ -492,11 +495,11 @@ static void lwm2m_interface_connection_event_handler(connection_event_t event, v
 
                 // Resume is used here for restarting the reconnection pattern.
                 // This is only done when reconnection time is on average shorter than it would be without this call.
-                tr_info("Calling lwm2m_interface_resume to reconnect.");
+                tr_info("Calling resume to reconnect");
                 lwm2m_interface_resume(interface);
 
             } else {
-                tr_info("Status change ignored.");
+                tr_info("Status change ignored");
             }
 
             break;
@@ -548,7 +551,7 @@ void lwm2m_interface_init(lwm2m_interface_t *interface,
 {
     MBED_ASSERT(interface != NULL);
 
-    tr_debug("lwm2m_interface_init() -IN");
+    tr_debug("init() -IN");
 #ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
     interface->callback_handler = NULL;
 #endif // MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
@@ -591,7 +594,7 @@ void lwm2m_interface_init(lwm2m_interface_t *interface,
     // The server object won't handle any coap requests, but needs to be registered because of the res_cb
     object_handler_t *handler = endpoint_allocate_object_handler(M2M_SERVER_ID, get_server_object_resources, NULL, NULL);
     if (!handler) {
-        tr_error("lwm2m_interface_init() failed to allocate object handler");
+        tr_error("init() failed to allocate object handler");
         assert(handler); // if this happens it's a fatal error
         return;
     }
@@ -608,7 +611,7 @@ bool lwm2m_interface_setup(lwm2m_interface_t *interface,
 {
     MBED_ASSERT(interface != NULL);
 
-    tr_debug("lwm2m_interface_setup()");
+    tr_debug("setup()");
 
     if (event_handler_id < 0) {
         event_handler_id = eventOS_event_handler_create(lwm2m_interface_event_handler, LWM2M_INTERFACE_EVENT_INIT);
@@ -617,7 +620,7 @@ bool lwm2m_interface_setup(lwm2m_interface_t *interface,
     interface->event_handler_id = event_handler_id;
 
     if (interface->event_handler_id < 0) {
-        tr_error("lwm2m_interface_setup() eventOS_event_handler_create failed!");
+        tr_error("setup() eventOS_event_handler_create failed");
         return false;
     }
 
@@ -630,7 +633,7 @@ bool lwm2m_interface_setup(lwm2m_interface_t *interface,
     // Range is from 2 to 10
     interface->initial_reconnection_time = randLIB_get_random_in_range(2, 10);
 
-    tr_info("lwm2m_interface_init() initial random time %d\n", interface->initial_reconnection_time);
+    tr_info("init() initial random time %d\n", interface->initial_reconnection_time);
     interface->reconnection_time = interface->initial_reconnection_time;
 
     initialize_storage();
@@ -644,7 +647,7 @@ bool lwm2m_interface_setup(lwm2m_interface_t *interface,
                                         life_time,
                                         interface->event_handler_id)) {
 
-        tr_error("lwm2m_interface_setup() create_endpoint failed!");
+        tr_error("setup() create_endpoint failed");
         lwm2m_interface_clean(interface);
 
         return false;
@@ -664,7 +667,7 @@ static void lwm2m_interface_initialize_root_of_trust(void)
     bool success = false;
 
     if (CCS_STATUS_SUCCESS == get_config_parameter(ROOT_OF_TRUST, buffer, max_size, &real_size)) {
-        tr_info("lwm2m_interface_initialize_root_of_trust() - read RoT from configuration, size %d", (int)real_size);
+        tr_info("initialize_root_of_trust() - read RoT from configuration, size %d", (int)real_size);
         success = true;
     }
 
@@ -677,7 +680,7 @@ static void lwm2m_interface_initialize_root_of_trust(void)
 
 #elif MBED_CONF_MBED_CLOUD_CLIENT_USE_INSECURE_ROT
     #warning "You are using an insecure Root Of Trust implementation, DO NOT USE IN PRODUCTION ENVIRONMENTS. REPLACE WITH A PROPER IMPLEMENTATION BEFORE USE"
-        tr_warn("lwm2m_interface_initialize_root_of_trust() Using insecure implementation to generate Root of Trust.");
+        tr_warn("initialize_root_of_trust() Using insecure implementation to generate Root of Trust");
         randLIB_get_n_bytes_random(&buffer, max_size);
         len = max_size;
 #else
@@ -686,10 +689,10 @@ static void lwm2m_interface_initialize_root_of_trust(void)
 
         if (len == max_size) {
             if (CCS_STATUS_SUCCESS != set_config_parameter(ROOT_OF_TRUST, buffer, max_size)) {
-                tr_error("lwm2m_interface_initialize_root_of_trust() failed to store new RoT");
+                tr_error("initialize_root_of_trust() failed to store new RoT");
             }
         } else {
-            tr_error("lwm2m_interface_initialize_root_of_trust() failed to generate new RoT");
+            tr_error("initialize_root_of_trust() failed to generate new RoT");
         }
     }
 
@@ -705,7 +708,7 @@ bool lwm2m_interface_create_endpoint(lwm2m_interface_t *interface,
 {
     MBED_ASSERT(interface != NULL);
 
-    tr_info("lwm2m_interface_create_endpoint(type %s, lifetime %" PRId32 ", event_handler_id %" PRId8 ")",
+    tr_info("create_endpoint(type %s, lifetime %" PRId32 ", event_handler_id %" PRId8 ")",
             type, life_time, event_handler_id);
 
     if (endpoint_setup(&interface->endpoint, event_handler_id) != ENDPOINT_STATUS_OK) {
@@ -721,7 +724,7 @@ bool lwm2m_interface_create_endpoint(lwm2m_interface_t *interface,
     bool endpoint_correct = endpoint_set_parameters(&interface->endpoint, type, life_time);
 
     if (!endpoint_correct) {
-        tr_error("lwm2m_interface_create_endpoint() endpoint params are not valid");
+        tr_error("create_endpoint() endpoint params are not valid");
     }
 
     return endpoint_correct;
@@ -733,6 +736,12 @@ bool lwm2m_interface_send_update_registration(lwm2m_interface_t *interface)
     MBED_ASSERT(interface != NULL);
 
     return (ENDPOINT_STATUS_OK == endpoint_update_registration(&interface->endpoint));
+}
+
+void lwm2m_interface_set_cid_value(lwm2m_interface_t *interface, const uint8_t *data_ptr, const size_t data_len)
+{
+    MBED_ASSERT(interface != NULL);
+    set_cid_value(&interface->connection, data_ptr, data_len);
 }
 
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
@@ -750,7 +759,7 @@ static registry_status_t lwm2m_interface_registration_update_cb(registry_callbac
     if (REGISTRY_CALLBACK_EXECUTE == cb_type) {
 
         if (ENDPOINT_STATUS_OK != endpoint_update_registration(endpoint)) {
-            tr_error("lwm2m_interface_registration_update_cb() failed to send update registration");
+            tr_error("registration_update_cb() failed to send update registration");
             return REGISTRY_STATUS_NO_MEMORY;
         }
 
@@ -798,14 +807,14 @@ void lwm2m_interface_stop(lwm2m_interface_t *interface)
 {
     MBED_ASSERT(interface != NULL);
 
-    tr_debug("lwm2m_interface_stop() - IN");
+    tr_debug("stop() IN");
 
     lwm2m_interface_stop_timers(interface->event_handler_id);
 
     endpoint_stop(&interface->endpoint);
     connection_close(&interface->connection);
 
-    tr_debug("lwm2m_interface_stop() - OUT");
+    tr_debug("stop() OUT");
 }
 
 void lwm2m_interface_pause(lwm2m_interface_t *interface)
@@ -815,7 +824,7 @@ void lwm2m_interface_pause(lwm2m_interface_t *interface)
         return;
     }
 
-    tr_debug("lwm2m_interface_pause() - IN");
+    tr_debug("pause() IN");
 
     lwm2m_interface_stop_timers(interface->event_handler_id);
 
@@ -823,7 +832,7 @@ void lwm2m_interface_pause(lwm2m_interface_t *interface)
 
     connection_pause(&interface->connection);
 
-    tr_debug("lwm2m_interface_pause() - OUT");
+    tr_debug("pause() OUT");
 }
 
 bool lwm2m_interface_resume(lwm2m_interface_t *interface)
@@ -831,22 +840,31 @@ bool lwm2m_interface_resume(lwm2m_interface_t *interface)
     MBED_ASSERT(interface != NULL);
 
 #ifdef MBED_CONF_CLOUD_CLIENT_USE_SOFT_PAUSE_RESUME
-    tr_debug("lwm2m_interface_resume() - soft, IN");
-    connection_resume(&interface->connection);
-#else
-    tr_debug("lwm2m_interface_resume() - IN");
+    tr_debug("resume() - soft, IN");
+    if (connection_resume(&interface->connection)) {
+        return true;
+    } else {
+        tr_debug("Couldn't soft resume, lwm2m_interface_resume() - IN");
+    }
+#endif
+
+    // Trigger full reconnect
     lwm2m_interface_internal_event(interface, STATE_IDLE, NULL);
     interface->reconnecting = false;
     interface->is_registered = false;
     interface->retry_timer_expired = false;
     interface->reconnection_time = interface->initial_reconnection_time;
     interface->reconnection_state = LWM2M_INTERFACE_RECONNECTION_STATE_WITH_UPDATE;
+#ifdef MBED_CONF_CLOUD_CLIENT_USE_SOFT_PAUSE_RESUME
+    if (!lwm2m_interface_reset_timer(interface, LWM2M_INTERFACE_TIMER_RETRY, interface->event_handler_id, 0)) {
+#else
     if (!lwm2m_interface_reset_timer(interface, LWM2M_INTERFACE_TIMER_RETRY, interface->event_handler_id, interface->reconnection_time * 1000)) {
+#endif
         tr_error("lwm2m_interface_resume() lwm2m_interface_reset_timer Failed");
         return false;
     }
-#endif
-    tr_debug("lwm2m_interface_resume() - OUT");
+
+    tr_debug("resume() OUT");
 
     return true;
 
@@ -856,7 +874,7 @@ void lwm2m_interface_clean(lwm2m_interface_t *interface)
 {
     MBED_ASSERT(interface != NULL);
 
-    tr_debug("lwm2m_interface_clean() - IN");
+    tr_debug("clean() IN");
 
     lwm2m_interface_stop_timers(interface->event_handler_id);
 
@@ -868,7 +886,7 @@ void lwm2m_interface_clean(lwm2m_interface_t *interface)
 
     uninitialize_storage();
 
-    tr_debug("lwm2m_interface_clean() - OUT");
+    tr_debug("clean() OUT");
 }
 
 void lwm2m_interface_bootstrap(lwm2m_interface_t *interface)
@@ -876,7 +894,7 @@ void lwm2m_interface_bootstrap(lwm2m_interface_t *interface)
     MBED_ASSERT(interface != NULL);
 
 #ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
-    tr_debug("lwm2m_interface_bootstrap() - IN");
+    tr_debug("bootstrap() IN");
 
     eventOS_event_timer_cancel(LWM2M_INTERFACE_TIMER_RETRY, interface->event_handler_id);
 
@@ -910,7 +928,7 @@ void lwm2m_interface_bootstrap(lwm2m_interface_t *interface)
         lwm2m_interface_set_error_description(interface, ERROR_REASON_2);
         lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_ERROR, LWM2M_INTERFACE_ERROR_NOT_ALLOWED);
     }
-    tr_debug("lwm2m_interface_bootstrap() - OUT");
+    tr_debug("bootstrap() OUT");
 #else
     lwm2m_interface_set_error_description(interface, ERROR_REASON_3);
     lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_ERROR, LWM2M_INTERFACE_ERROR_NOT_ALLOWED);
@@ -928,7 +946,7 @@ void lwm2m_interface_register_object(lwm2m_interface_t *interface, uint16_t secu
 {
     MBED_ASSERT(interface != NULL);
 
-    tr_debug("lwm2m_interface_register_object - IN");
+    tr_debug("register_object IN");
     // TODO: check that the security object instance exists
     if(false) {
         lwm2m_interface_set_error_description(interface, ERROR_REASON_4);
@@ -966,14 +984,14 @@ void lwm2m_interface_register_object(lwm2m_interface_t *interface, uint16_t secu
         lwm2m_interface_set_error_description(interface, ERROR_REASON_5);
         lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_ERROR, LWM2M_INTERFACE_ERROR_NOT_ALLOWED);
     }
-    tr_debug("lwm2m_interface_register_object - OUT");
+    tr_debug("register_object OUT");
 }
 
 void lwm2m_interface_update_registration(lwm2m_interface_t *interface, uint16_t security_instance, const uint32_t lifetime)
 {
     MBED_ASSERT(interface != NULL);
 
-    tr_debug("lwm2m_interface_update_registration()");
+    tr_debug("update_registration()");
     lwm2m_interface_event_data_u data;
     data.update_register_data.security_instance = security_instance;
     data.update_register_data.lifetime = lifetime;
@@ -984,7 +1002,7 @@ void lwm2m_interface_unregister_object(lwm2m_interface_t *interface)
 {
     MBED_ASSERT(interface != NULL);
 
-    tr_debug("lwm2m_interface_unregister_object - current state %d", interface->current_state);
+    tr_debug("unregister_object - current state %d", interface->current_state);
     // Transition to a new state based upon
     // the current state of the state machine
     BEGIN_TRANSITION_MAP                                // - Current State -
@@ -1013,7 +1031,7 @@ void lwm2m_interface_unregister_object(lwm2m_interface_t *interface)
         lwm2m_interface_set_error_description(interface, ERROR_REASON_6);
         lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_ERROR, LWM2M_INTERFACE_ERROR_NOT_ALLOWED);
     }
-    tr_debug("lwm2m_interface_unregister_object - OUT");
+    tr_debug("unregister_object OUT");
 }
 
 #ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
@@ -1034,7 +1052,7 @@ void lwm2m_interface_set_entropy_callback(lwm2m_interface_t *interface, entropy_
     MBED_ASSERT(interface != NULL);
 
     if (connection_set_entropy_callback(&interface->connection, callback) < 0) {
-        tr_error("lwm2m_interface_set_entropy_callback() failed to add entropy source");
+        tr_error("set_entropy_callback() failed to add entropy source");
     }
 }
 #endif // PROTOMAN_OFFLOAD_TLS
@@ -1048,12 +1066,12 @@ void lwm2m_interface_set_platform_network_handler(lwm2m_interface_t *interface, 
 
 static void lwm2m_interface_client_registered(lwm2m_interface_t *interface)
 {
-    tr_info("lwm2m_interface_client_registered");
+    tr_info("client_registered");
     interface->is_registered = true;
     lwm2m_interface_internal_event(interface, STATE_REGISTERED, NULL);
 
 #if defined(MBED_CLOUD_CLIENT_FOTA_ENABLE) && !defined(MBED_CLOUD_FOTA_CUSTOM_RESUME)
-    fota_app_resume();
+    fota_internal_resume();
 #endif
 
     // Inform client is registered.
@@ -1064,11 +1082,11 @@ static void lwm2m_interface_client_registered(lwm2m_interface_t *interface)
 
 static void lwm2m_interface_registration_updated(lwm2m_interface_t *interface)
 {
-    tr_info("lwm2m_interface_registration_updated");
+    tr_info("registration_updated");
     interface->is_registered = true;
     lwm2m_interface_internal_event(interface, STATE_REGISTERED, NULL);
 #if defined(MBED_CLOUD_CLIENT_FOTA_ENABLE) && !defined(MBED_CLOUD_FOTA_CUSTOM_RESUME)
-    fota_app_resume();
+    fota_internal_resume();
 #endif
     // TODO: use server id as parameter?
     lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_REGISTRATION_UPDATED, LWM2M_INTERFACE_ERROR_NONE);
@@ -1076,7 +1094,7 @@ static void lwm2m_interface_registration_updated(lwm2m_interface_t *interface)
 
 static void lwm2m_interface_registration_error(lwm2m_interface_t *interface, lwm2m_interface_error_t error_code)
 {
-    tr_error("lwm2m_interface_registration_error code [%d]", error_code);
+    tr_error("registration_error code [%d]", error_code);
     interface->is_registered = false;
     endpoint_stop(&interface->endpoint);
 
@@ -1098,11 +1116,11 @@ else if (error_code == LWM2M_INTERFACE_ERROR_INVALID_PARAMETERS) {
     else if (interface->reconnection_state == LWM2M_INTERFACE_RECONNECTION_STATE_WITH_UPDATE) {
 
         // If update registration failed again try full registration right away
-        tr_info("Update registration retry failed, try full registration right away.");
+        tr_info("Update registration retry failed, try full registration right away");
         interface->reconnection_state = LWM2M_INTERFACE_RECONNECTION_STATE_FULL_REGISTRATION;
         if(ENDPOINT_STATUS_OK != endpoint_register(&interface->endpoint)) {
             // If resource creation fails then inform error to application
-            tr_error("lwm2m_interface_registration_error endpoint_register: LWM2M_INTERFACE_ERROR_NOT_ALLOWED");
+            tr_error("registration_error endpoint_register: LWM2M_INTERFACE_ERROR_NOT_ALLOWED");
             error_code = LWM2M_INTERFACE_ERROR_NOT_ALLOWED;
         } else {
             return;
@@ -1114,12 +1132,19 @@ else if (error_code == LWM2M_INTERFACE_ERROR_INVALID_PARAMETERS) {
 
 static void lwm2m_interface_client_unregistered(lwm2m_interface_t *interface)
 {
-    tr_info("lwm2m_interface_client_unregistered()");
+    tr_info("client_unregistered()");
     interface->unregister_ongoing = false;
     interface->is_registered = false;
     lwm2m_interface_internal_event(interface, STATE_UNREGISTERED, NULL);
     lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_OBJECT_UNREGISTERED, LWM2M_INTERFACE_ERROR_NONE);
 }
+
+#if defined (MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP)
+static void lwm2m_interface_client_ping(lwm2m_interface_t *interface)
+{
+    interface->reconnection_state = LWM2M_INTERFACE_RECONNECTION_STATE_CLIENT_PING;
+}
+#endif
 
 #ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 static void lwm2m_interface_bootstrap_done(lwm2m_interface_t *interface)
@@ -1127,7 +1152,7 @@ static void lwm2m_interface_bootstrap_done(lwm2m_interface_t *interface)
     registry_path_t path;
     bool bootstrap;
 
-    tr_info("lwm2m_interface_bootstrap_done");
+    tr_info("bootstrap_done");
 
     registry_set_path(&path, M2M_SECURITY_ID, 0, SECURITY_BOOTSTRAP_SERVER, 0, REGISTRY_PATH_RESOURCE);
     if (REGISTRY_STATUS_OK != registry_get_value_boolean(&interface->endpoint.registry, &path, &bootstrap)) {
@@ -1165,14 +1190,14 @@ static void lwm2m_interface_bootstrap_done(lwm2m_interface_t *interface)
 static void lwm2m_interface_bootstrap_wait(lwm2m_interface_t *interface)
 {
 
-    tr_info("lwm2m_interface_bootstrap_wait");
+    tr_info("bootstrap_wait");
     lwm2m_interface_internal_event(interface, STATE_BOOTSTRAP_WAIT, NULL);
 }
 
 static void lwm2m_interface_bootstrap_error(lwm2m_interface_t *interface, const char *reason)
 {
 
-    tr_error("lwm2m_interface_bootstrap_error(%s)", reason);
+    tr_error("bootstrap_error(%s)", reason);
     interface->bootstrapped = false;
 
     eventOS_event_timer_cancel(LWM2M_INTERFACE_TIMER_BOOTSTRAP_FLOW, interface->event_handler_id);
@@ -1193,7 +1218,7 @@ static void lwm2m_interface_bootstrap_error(lwm2m_interface_t *interface, const 
                                 interface->event_handler_id,
                                 interface->reconnection_time * 1000);
 
-    tr_info("lwm2m_interface_bootstrap_error - reconnecting in %" PRIu32 "(s)", interface->reconnection_time);
+    tr_info("bootstrap_error - reconnecting in %" PRIu32 "(s)", interface->reconnection_time);
     interface->reconnection_time = interface->reconnection_time * RECONNECT_INCREMENT_FACTOR;
     if(interface->reconnection_time >= MAX_RECONNECT_TIMEOUT) {
         interface->reconnection_time = MAX_RECONNECT_TIMEOUT;
@@ -1207,7 +1232,7 @@ static void lwm2m_interface_data_available(lwm2m_interface_t *interface,
                                     uint16_t data_size,
                                     const lwm2m_interface_socketaddress_t *address)
 {
-    tr_debug("lwm2m_interface_data_available");
+    tr_debug("data_available");
     lwm2m_interface_event_data_u event;
     event.received_data.data = data;
     event.received_data.size = data_size;
@@ -1221,22 +1246,24 @@ static void lwm2m_interface_connection_handler(lwm2m_interface_t *interface, lwm
     endpoint_stop(&interface->endpoint);
     connection_close(&interface->connection);
     if (interface->current_state == STATE_BOOTSTRAP_WAIT) {
-        tr_debug("lwm2m_interface_connection_handler() bootstrap completed");
+        tr_debug("connection_handler() bootstrap completed");
        // Bootstrap completed once PEER CLOSE notify received from the server.
        return;
     }
 
-    tr_error("lwm2m_interface_connection_handler: (%d), reconnecting (%d), reconnection_state (%d)",
+    tr_error("connection_handler: (%d), reconnecting (%d), reconnection_state (%d)",
             error_code, interface->reconnecting, (int)interface->reconnection_state);
 
-#ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
-    // Ignore errors while client is sleeping
-    if (lwm2m_interface_queue_mode(interface)) {
-        if (interface->callback_handler && interface->queue_mode_timer_ongoing && error_code != LWM2M_INTERFACE_ERROR_TIMEOUT) {
-            tr_info("lwm2m_interface_connection_handler - Queue Mode - don't try to reconnect while in QueueMode");
-            return;
-        }
-        eventOS_event_timer_cancel(LWM2M_INTERFACE_TIMER_QUEUE_SLEEP, interface->event_handler_id);
+#if defined (MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE) || defined(MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP)
+    if ((interface->binding_mode == BINDING_MODE_U || interface->binding_mode == BINDING_MODE_Q) &&
+         error_code == LWM2M_INTERFACE_ERROR_NETWORK_ERROR && is_connection_id_available()) {
+        // Check if we can ping LWm2m server (send it immediately and lets have timeout of 60 seconds)
+        //   if(server responds)
+        //       CID has expired, delete CID do handshake
+        //   else
+        //        Network issue, do not delete CID but continue reconnection logic (99%)
+        lwm2m_interface_client_ping(interface);
+        return;
     }
 #endif //MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
 
@@ -1251,7 +1278,7 @@ static void lwm2m_interface_connection_handler(lwm2m_interface_t *interface, lwm
         if (interface->reconnection_state == LWM2M_INTERFACE_RECONNECTION_STATE_FULL_REGISTRATION) {
             interface->reconnection_state = LWM2M_INTERFACE_RECONNECTION_STATE_NONE;
         } else if (interface->reconnection_state == LWM2M_INTERFACE_RECONNECTION_STATE_UNREGISTRATION) {
-            tr_info("lwm2m_interface_connection_handler - unreg failed again just call client_unregistered");
+            tr_info("connection_handler - unreg failed again just call client_unregistered");
             lwm2m_interface_client_unregistered(interface);
             return;
         }
@@ -1263,7 +1290,7 @@ static void lwm2m_interface_connection_handler(lwm2m_interface_t *interface, lwm
                                 interface->event_handler_id,
                                 interface->reconnection_time * 1000);
 
-    tr_info("lwm2m_interface_connection_handler - reconnecting in %" PRIu32 "(s)", interface->reconnection_time);
+    tr_info("connection_handler - reconnecting in %" PRIu32 "(s)", interface->reconnection_time);
     interface->reconnection_time = interface->reconnection_time * RECONNECT_INCREMENT_FACTOR;
     if (interface->reconnection_time >= MAX_RECONNECT_TIMEOUT) {
         interface->reconnection_time = MAX_RECONNECT_TIMEOUT;
@@ -1281,7 +1308,7 @@ void lwm2m_interface_data_sent(lwm2m_interface_t *interface)
 {
     MBED_ASSERT(interface != NULL);
 
-    tr_debug("lwm2m_interface_data_sent()");
+    tr_debug("data_sent()");
 
 #ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
     if (lwm2m_interface_queue_mode(interface) && interface->callback_handler) {
@@ -1316,7 +1343,7 @@ static void lwm2m_interface_timer_expired(lwm2m_interface_t *interface, lwm2m_in
     else if (LWM2M_INTERFACE_TIMER_RETRY == type) {
 
         if (interface->reconnecting) {
-            tr_debug("lwm2m_interface_timer_expired() - retry");
+            tr_debug("timer_expired() - retry");
             interface->reconnect_attempt++;
             interface->retry_timer_expired = true;
         }
@@ -1331,14 +1358,14 @@ static void lwm2m_interface_timer_expired(lwm2m_interface_t *interface, lwm2m_in
     }
     else if (LWM2M_INTERFACE_TIMER_BOOTSTRAP_FLOW == type) {
 #ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
-        tr_debug("lwm2m_interface_timer_expired() - bootstrap");
+        tr_debug("timer_expired() - bootstrap");
         interface->bootstrapped = false;
         eventOS_event_timer_cancel(LWM2M_INTERFACE_TIMER_BOOTSTRAP_FLOW, interface->event_handler_id);
         lwm2m_interface_bootstrap_error(interface, ERROR_REASON_23);
 #endif //MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
     }
     else if (LWM2M_INTERFACE_TIMER_REGISTRATION_FLOW == type) {
-        tr_debug("lwm2m_interface_timer_expired() - register");
+        tr_debug("timer_expired() - register");
         lwm2m_interface_registration_error(interface, LWM2M_INTERFACE_ERROR_TIMEOUT);
     }
 #ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
@@ -1349,14 +1376,14 @@ static void lwm2m_interface_timer_expired(lwm2m_interface_t *interface, lwm2m_in
 #endif
         if (queue_size > 0 || !interface->is_registered || interface->reconnecting || !interface->bootstrapped) {
 
-            tr_debug("lwm2m_interface_timer_expired() - RESEND queue not empty, or not registered, or reconnection or bootstrap ongoing, continue sleep timer");
+            tr_debug("timer_expired() - RESEND queue not empty, or not registered, or reconnection or bootstrap ongoing, continue sleep timer");
             lwm2m_interface_reset_timer(interface,
                                         LWM2M_INTERFACE_TIMER_QUEUE_SLEEP,
                                         interface->event_handler_id,
                                         MBED_CLIENT_RECONNECTION_COUNT * MBED_CLIENT_RECONNECTION_INTERVAL * 1000);
 
         } else {
-            tr_debug("lwm2m_interface_timer_expired() - sleep");
+            tr_debug("timer_expired() - sleep");
             //TODO: Check if more actions needed here?
             interface->queue_mode_timer_ongoing = true;
             if(interface->callback_handler) {
@@ -1370,7 +1397,7 @@ static void lwm2m_interface_timer_expired(lwm2m_interface_t *interface, lwm2m_in
 // state machine sits here.
 static void lwm2m_interface_state_idle(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
-    tr_debug("lwm2m_interface_state_idle");
+    tr_debug("state_idle");
     interface->unregister_ongoing = false; //TODO Check if this set should be done here?
     eventOS_event_timer_cancel(LWM2M_INTERFACE_TIMER_QUEUE_SLEEP, interface->event_handler_id);
 }
@@ -1398,16 +1425,25 @@ static void lwm2m_interface_state_bootstrap_or_register(lwm2m_interface_t *inter
     const void *ca_certificate = NULL;
     size_t ca_certificate_size = 0;
     interface->is_registered = false;
-    tr_debug("lwm2m_interface_state_bootstrap_or_register() bootstrap: %d", bootstrap);
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    bool ignore_session_resume = interface->reconnection_state == LWM2M_INTERFACE_RECONNECTION_STATE_CLIENT_PING;
+    if (ignore_session_resume) {
+        if (interface->is_registered) {
+            interface->reconnection_state = LWM2M_INTERFACE_RECONNECTION_STATE_WITH_UPDATE;
+        } else {
+            interface->reconnection_state = LWM2M_INTERFACE_RECONNECTION_STATE_NONE;
+        }
+    }
+#endif
+
+    tr_debug("state_bootstrap_or_register() in %s sequence", (bootstrap ? "bootstrap" : "register"));
 
 #ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
     if (bootstrap) {
-        tr_debug("lwm2m_interface_state_bootstrap_or_register() in bootstrap sequence");
         interface->bootstrapped = false;
     } else
 #endif
     {
-        tr_debug("lwm2m_interface_state_bootstrap_or_register() in register sequence");
         interface->listen_port = 0;
 #ifndef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
         storage_set_credentials(&interface->endpoint.registry);
@@ -1418,7 +1454,7 @@ static void lwm2m_interface_state_bootstrap_or_register(lwm2m_interface_t *inter
     *full_server_address_end = '\0';
 
     if (strlen(full_server_address)) {
-        tr_debug("lwm2m_interface_state_bootstrap_or_register - server_address %s", full_server_address);
+        tr_debug("state_bootstrap_or_register - server_address %s", full_server_address);
 
 #ifndef MBED_CLIENT_ENABLE_MINIMAL_SERVER_URL_PROCESSING
         if (strstr(full_server_address, COAP)) {
@@ -1432,6 +1468,10 @@ static void lwm2m_interface_state_bootstrap_or_register(lwm2m_interface_t *inter
         // Don't strip protocol string
         server_address = full_server_address;
 #endif
+        if (server_address == NULL) {
+            tr_error("No valid server address available");
+            goto finish;
+        }
         lwm2m_interface_process_address(interface, server_address);
 
         uint8_t connection_mode = CONNECTION_MODE_UDP;
@@ -1441,7 +1481,7 @@ static void lwm2m_interface_state_bootstrap_or_register(lwm2m_interface_t *inter
         }
 #endif
 
-        tr_debug("lwm2m_interface_state_bootstrap_or_register - IP address %s , Port %d", interface->server_ip_address, interface->server_port);
+        tr_debug("state_bootstrap_or_register - IP address %s , Port %d", interface->server_ip_address, interface->server_port);
         // If bind and resolving server address succeed then proceed else
         // return error to the application and go to Idle state.
         if(strlen(interface->server_ip_address) != 0) {
@@ -1504,6 +1544,9 @@ static void lwm2m_interface_state_bootstrap_or_register(lwm2m_interface_t *inter
 #if defined(PROTOMAN_USE_SSL_SESSION_RESUME) || defined(PROTOMAN_OFFLOAD_TLS)
                                                             , bootstrap
 #endif
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+                                                            , ignore_session_resume
+#endif
                                                             )) {
                     error = LWM2M_INTERFACE_ERROR_NONE;
                     connection_start(&interface->connection);
@@ -1514,9 +1557,10 @@ static void lwm2m_interface_state_bootstrap_or_register(lwm2m_interface_t *inter
         }
     }
 
+finish:
     // XXX: still needed? fast fail could be easier to pull off if this were a function.
     if (error != LWM2M_INTERFACE_ERROR_NONE) {
-        tr_error("lwm2m_interface_state_bootstrap_or_register - set error as LWM2M_INTERFACE_INVALID_PARAMETERS");
+        tr_error("state_bootstrap_or_register : INVALID_PARAMETERS");
         lwm2m_interface_internal_event(interface, STATE_IDLE, NULL);
         lwm2m_interface_set_error_description(interface, ERROR_REASON_11);
         lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_ERROR, error);
@@ -1529,13 +1573,13 @@ static void lwm2m_interface_state_bootstrap_address_resolved(lwm2m_interface_t *
 {
     (void)data;
 
-    tr_debug("lwm2m_interface_state_bootstrap_address_resolved()");
+    tr_debug("state_bootstrap_address_resolved()");
 
     if(ENDPOINT_STATUS_OK == endpoint_bootstrap(&interface->endpoint)) {
        lwm2m_interface_internal_event(interface, STATE_BOOTSTRAP_RESOURCE_CREATED, NULL);
     } else{
         // If resource creation fails then inform error to application
-        tr_error("lwm2m_interface_state_bootstrap_address_resolved : LWM2M_INTERFACE_ERROR_NOT_ALLOWED");
+        tr_error("state_bootstrap_address_resolved : ERROR_NOT_ALLOWED");
         lwm2m_interface_internal_event(interface, STATE_IDLE, NULL);
         lwm2m_interface_set_error_description(interface, ERROR_REASON_12);
         lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_ERROR, LWM2M_INTERFACE_ERROR_NOT_ALLOWED);
@@ -1544,19 +1588,19 @@ static void lwm2m_interface_state_bootstrap_address_resolved(lwm2m_interface_t *
 
 static void lwm2m_interface_state_bootstrap_resource_created(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
-    tr_debug("lwm2m_interface_state_bootstrap_resource_created");
+    tr_debug("state_bootstrap_resource_created");
 }
 
 static void lwm2m_interface_state_bootstrapped(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
-    tr_debug("lwm2m_interface_state_bootstrapped");
+    tr_debug("state_bootstrapped");
     connection_close(&interface->connection);
 }
 #endif //MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
 
 static void lwm2m_interface_state_register(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
-    tr_debug("lwm2m_interface_state_register");
+    tr_debug("state_register");
     lwm2m_interface_state_bootstrap_or_register(interface, data, false);
 }
 
@@ -1630,27 +1674,24 @@ static void lwm2m_interface_state_register_address_resolved(lwm2m_interface_t *i
 
     (void)data;
 
-    tr_debug("lwm2m_interface_state_register_address_resolved");
+    tr_debug("state_register_address_resolved");
 
     connection_get_server_address(&interface->connection, &address, &address_len, &port);
 
-    if(address_len == 4) {
-        tr_info("lwm2m_interface_state_register_address_resolved : IPv4 address");
-
-    } else {
-        tr_info("lwm2m_interface_state_register_address_resolved : IPv6 address");
-    }
+    tr_info("state_register_address_resolved : IPv%d address", ((address_len == 4) ? 4 : 6));
 
     switch (interface->reconnection_state) {
         case LWM2M_INTERFACE_RECONNECTION_STATE_NONE:
         case LWM2M_INTERFACE_RECONNECTION_STATE_FULL_REGISTRATION:
             if(ENDPOINT_STATUS_OK != endpoint_register(&interface->endpoint)) {
                 // If resource creation fails then inform error to application
-                tr_error("lwm2m_interface_state_register_address_resolved : LWM2M_INTERFACE_ERROR_NOT_ALLOWED");
+                tr_error("state_register_address_resolved : LWM2M_INTERFACE_ERROR_NOT_ALLOWED");
                 lwm2m_interface_internal_event(interface, STATE_IDLE, NULL);
                 lwm2m_interface_set_error_description(interface, ERROR_REASON_25);
                 lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_ERROR, LWM2M_INTERFACE_ERROR_NOT_ALLOWED);
             }
+            break;
+        case LWM2M_INTERFACE_RECONNECTION_STATE_CLIENT_PING:
             break;
         case LWM2M_INTERFACE_RECONNECTION_STATE_WITH_UPDATE:
             // Start registration update in case it is reconnection logic because of network issue.
@@ -1668,7 +1709,7 @@ static void lwm2m_interface_state_registered(lwm2m_interface_t *interface, lwm2m
     uint32_t lifetime = MINIMUM_REGISTRATION_TIME;
     uint16_t registration_percent = REREGISTRATION_INTERVAL;
 
-    tr_info("lwm2m_interface_state_registered");
+    tr_info("state_registered");
 
     eventOS_event_timer_cancel(LWM2M_INTERFACE_TIMER_REGISTRATION_FLOW, interface->event_handler_id);
 
@@ -1702,7 +1743,7 @@ static void lwm2m_interface_state_registered(lwm2m_interface_t *interface, lwm2m
 
         // Find the string following the second "/" character in the endpoint location-path
         // The format should be "rd/<aid>/<iep>"
-        while ((iep = strstr(iep, "/"))) {
+        while ((iep = strstr(iep, "/")) != NULL) {
             iep++;
             if (++count == 2) {
                 break;
@@ -1711,15 +1752,15 @@ static void lwm2m_interface_state_registered(lwm2m_interface_t *interface, lwm2m
 
         if (iep && strlen(iep) > 0) {
             if (!storage_set_internal_endpoint_name(iep)) {
-                tr_error("lwm2m_interface_state_registered() error storing internal endpoint name");
+                tr_error("state_registered() error storing internal endpoint name");
             }
         } else {
-            tr_error("lwm2m_interface_state_registered() failed to parse internal endpoint name");
+            tr_error("state_registered() failed to parse internal endpoint name");
         }
 
 #endif
     } else {
-        tr_error("lwm2m_interface_state_registered() error reading endpoint lifetime");
+        tr_error("state_registered() error reading endpoint lifetime");
     }
 
     lwm2m_interface_reset_timer(interface,
@@ -1740,7 +1781,7 @@ static void lwm2m_interface_state_registered(lwm2m_interface_t *interface, lwm2m
 
 static void lwm2m_interface_state_update_registration(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
-    tr_debug("lwm2m_interface_state_update_registration");
+    tr_debug("state_update_registration");
 #ifdef MBED_CLOUD_CLIENT_TRANSPORT_MODE_UDP_QUEUE
     // Set to false to allow reconnection to work.
     interface->queue_mode_timer_ongoing = false;
@@ -1753,12 +1794,12 @@ static void lwm2m_interface_state_update_registration(lwm2m_interface_t *interfa
         endpoint_set_lifetime(&interface->endpoint, new_lifetime);
 
     } else {
-        tr_debug("lwm2m_interface_state_update_registration() no event data found");
+        tr_debug("state_update_registration no event data found");
     }
 
     if (ENDPOINT_STATUS_OK != endpoint_update_registration(&interface->endpoint)) {
 
-        tr_error("lwm2m_interface_state_update_registration : LWM2M_INTERFACE_ERROR_MEMORY_FAIL");
+        tr_error("state_update_registration : LWM2M_INTERFACE_ERROR_MEMORY_FAIL");
         lwm2m_interface_internal_event(interface, STATE_IDLE, NULL);
         lwm2m_interface_set_error_description(interface, ERROR_REASON_25);
         lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_ERROR, LWM2M_INTERFACE_ERROR_NOT_ALLOWED);
@@ -1768,14 +1809,14 @@ static void lwm2m_interface_state_update_registration(lwm2m_interface_t *interfa
 
 static void lwm2m_interface_state_unregister(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
-    tr_debug("lwm2m_interface_state_unregister");
+    tr_debug("state_unregister");
     if (interface->unregister_ongoing) {
-        tr_warn("lwm2m_interface_state_unregister : _unregister_ongoing");
+        tr_warn("state_unregister : _unregister_ongoing");
         return;
     }
     lwm2m_interface_internal_event(interface, STATE_SENDING_COAP_DATA, NULL);
     if (ENDPOINT_STATUS_OK != endpoint_unregister(&interface->endpoint)) {
-        tr_error("lwm2m_interface_state_unregister : LWM2M_INTERFACE_ERROR_NOT_ALLOWED");
+        tr_error("state_unregister : LWM2M_INTERFACE_ERROR_NOT_ALLOWED");
         lwm2m_interface_internal_event(interface, STATE_IDLE, NULL);
         lwm2m_interface_set_error_description(interface, ERROR_REASON_5);
         lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_ERROR, LWM2M_INTERFACE_ERROR_NOT_ALLOWED);
@@ -1786,7 +1827,7 @@ static void lwm2m_interface_state_unregister(lwm2m_interface_t *interface, lwm2m
 
 static void lwm2m_interface_state_unregistered(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
-    tr_info("lwm2m_interface_state_unregistered");
+    tr_info("state_unregistered");
     interface->reconnection_time = interface->initial_reconnection_time;
     interface->reconnection_state = LWM2M_INTERFACE_RECONNECTION_STATE_NONE;
     connection_close(&interface->connection);
@@ -1797,20 +1838,20 @@ static void lwm2m_interface_state_unregistered(lwm2m_interface_t *interface, lwm
 static void lwm2m_interface_state_sending_coap_data(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
     //NOTE: This function is no-longer used.
-    tr_debug("lwm2m_interface_state_sending_coap_data");
+    tr_debug("state_sending_coap_data");
     lwm2m_interface_internal_event(interface, STATE_WAITING, NULL);
 }
 
 static void lwm2m_interface_state_coap_data_sent(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
-    tr_debug("lwm2m_interface_state_coap_data_sent");
+    tr_debug("state_coap_data_sent");
     lwm2m_interface_internal_event(interface, STATE_WAITING, NULL);
 }
 
 static void lwm2m_interface_state_coap_data_received(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
 
-    tr_debug("lwm2m_interface_state_coap_data_received");
+    tr_debug("state_coap_data_received");
 
     if(data) {
         lwm2m_interface_received_data_t event = data->received_data;
@@ -1834,7 +1875,7 @@ static void lwm2m_interface_state_coap_data_received(lwm2m_interface_t *interfac
         // Process received data
         lwm2m_interface_internal_event(interface, STATE_PROCESSING_COAP_DATA, NULL);
         if(ENDPOINT_STATUS_OK != endpoint_process_coap(&interface->endpoint, event.data, event.size, &address)) {
-           tr_error("lwm2m_interface_state_coap_data_received : LWM2M_INTERFACE_ERROR_RESPONSE_PARSE_FAILED");
+           tr_error("state_coap_data_received : LWM2M_INTERFACE_ERROR_RESPONSE_PARSE_FAILED");
            lwm2m_interface_set_error_description(interface, ERROR_REASON_17);
            lwm2m_interface_notify_observer(interface, LWM2M_INTERFACE_OBSERVER_EVENT_ERROR, LWM2M_INTERFACE_ERROR_RESPONSE_PARSE_FAILED);
 
@@ -1851,19 +1892,19 @@ static void lwm2m_interface_state_coap_data_received(lwm2m_interface_t *interfac
 
 static void lwm2m_interface_state_processing_coap_data(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
-    tr_debug("lwm2m_interface_state_processing_coap_data");
+    tr_debug("state_processing_coap_data");
     lwm2m_interface_internal_event(interface, STATE_WAITING, NULL);
 }
 
 static void lwm2m_interface_state_coap_data_processed(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
-    tr_debug("lwm2m_interface_state_coap_data_processed");
+    tr_debug("state_coap_data_processed");
     lwm2m_interface_internal_event(interface, STATE_WAITING, NULL);
 }
 
 static void lwm2m_interface_state_waiting(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data)
 {
-    tr_debug("lwm2m_interface_state_waiting");
+    tr_debug("state_waiting");
 }
 
 // generates an external event. called once per external event
@@ -1872,14 +1913,14 @@ static void lwm2m_interface_external_event(lwm2m_interface_t *interface,
                                     uint8_t new_state,
                                     lwm2m_interface_event_data_u* p_data)
 {
-    tr_debug("lwm2m_interface_external_event : new state %d", new_state);
+    tr_debug("external_event : new state %d", new_state);
     // if we are supposed to ignore this event
     if (new_state == EVENT_IGNORED) {
-        tr_debug("lwm2m_interface_external_event : new state is EVENT_IGNORED");
+        tr_debug("external_event : new state is EVENT_IGNORED");
         interface->event_ignored = true;
     }
     else {
-        tr_debug("lwm2m_interface_external_event : handle new state");
+        tr_debug("external_event : handle new state");
 
         eventOS_cancel(&interface->external_event);
 
@@ -1905,7 +1946,7 @@ static void lwm2m_interface_internal_event(lwm2m_interface_t *interface,
                                     uint8_t new_state,
                                     lwm2m_interface_event_data_u* p_data)
 {
-    tr_debug("lwm2m_interface_internal_event : new state %d", new_state);
+    tr_debug("internal_event : new state %d", new_state);
     interface->event_data = p_data;
     interface->event_generated = true;
     interface->current_state = new_state;
@@ -1915,7 +1956,7 @@ static void lwm2m_interface_internal_event(lwm2m_interface_t *interface,
 // the state engine executes the state machine states
 static void lwm2m_interface_state_engine (lwm2m_interface_t *interface)
 {
-    tr_debug("lwm2m_interface_state_engine");
+    tr_debug("state_engine");
     lwm2m_interface_event_data_u* p_data_temp = NULL;
 
     // while events are being generated keep executing states
@@ -2002,7 +2043,7 @@ static void lwm2m_interface_state_function(lwm2m_interface_t *interface, lwm2m_i
 }
 
 void lwm2m_interface_start_register_update(lwm2m_interface_t *interface, lwm2m_interface_event_data_u *data) {
-    tr_debug("lwm2m_interface_start_register_update()");
+    tr_debug("start_register_update()");
 
     MBED_ASSERT(interface != NULL);
 
@@ -2170,7 +2211,7 @@ void lwm2m_interface_get_data_request(lwm2m_interface_t *interface,
     MBED_ASSERT(interface != NULL);
 
     if (interface->unregister_ongoing) {
-        tr_error("lwm2m_interface_get_data_request - unregister_ongoing!");
+        tr_error("get_data_request - unregister_ongoing");
         error_cb(ERROR_NOT_REGISTERED, context);
         return;
     }
@@ -2192,7 +2233,7 @@ bool lwm2m_interface_set_uri_query_parameters(lwm2m_interface_t *interface, cons
 static void lwm2m_interface_notify_observer(lwm2m_interface_t *interface, lwm2m_interface_observer_event_t event_id, lwm2m_interface_error_t event_type)
 {
     if (interface->observer_id < 0 || !interface->observer) {
-        tr_error("lwm2m_interface_notify_observer() no observer set");
+        tr_error("notify_observer() no observer set");
         return;
     }
 
@@ -2224,7 +2265,7 @@ static bool lwm2m_interface_reset_timer(lwm2m_interface_t *interface, int8_t tim
     eventOS_event_timer_cancel(timer, tasklet_id);
 
     if (!eventOS_event_timer_request_in(&event, eventOS_event_timer_ms_to_ticks(time_ms))) {
-        tr_error("lwm2m_interface_reset_timer() call to eventOS_event_timer_request_in() failed!");
+        tr_error("reset_timer() call to eventOS_event_timer_request_in() failed");
         return false;
     }
 
@@ -2232,7 +2273,7 @@ static bool lwm2m_interface_reset_timer(lwm2m_interface_t *interface, int8_t tim
 }
 
 static lwm2m_interface_error_t lwm2m_interface_convert_protoman_to_client_error(int protoman_error) {
-    tr_error("lwm2m_interface_convert_protoman_to_client_error - protoman error %d", protoman_error);
+    tr_error("convert_protoman_to_client_error - protoman error %d", protoman_error);
     lwm2m_interface_error_t error = LWM2M_INTERFACE_ERROR_NETWORK_ERROR;
     switch(protoman_error) {
         case PROTOMAN_ERR_DNS_RESOLVING_FAILED:

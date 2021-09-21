@@ -19,7 +19,9 @@
 #include <inttypes.h>
 
 #ifdef USER_OMA_OBJECT_FILE
+#if !defined(__CC_ARM)
 #pragma message ( "using user OMA object config file" )
+#endif
 #include USER_OMA_OBJECT_FILE
 #endif
 

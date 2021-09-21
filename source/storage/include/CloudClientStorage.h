@@ -104,7 +104,8 @@ typedef enum {
     CCS_STATUS_MEMORY_ERROR = 1,
     CCS_STATUS_VALIDATION_FAIL = 2,
     CCS_STATUS_KEY_DOESNT_EXIST = 3,
-    CCS_STATUS_ERROR = 4
+    CCS_STATUS_ERROR = 4,
+    CCS_STATUS_FI_ATTACK = 5
 } ccs_status_e;
 
 /**

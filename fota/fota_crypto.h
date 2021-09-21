@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2020 ARM Ltd.
+// Copyright 2019-2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -21,7 +21,7 @@
 
 #include "fota/fota_base.h"
 
-#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+#if defined(MBED_CLOUD_CLIENT_FOTA_ENABLE)
 
 #include "fota/fota_crypto_defs.h"
 
@@ -49,10 +49,40 @@ int fota_decrypt_data(
     uint8_t *tag);
 int fota_encrypt_finalize(fota_encrypt_context_t **ctx);
 
+#if (MBED_CLOUD_CLIENT_FOTA_KEY_ENCRYPTION == FOTA_USE_ENCRYPTED_ONE_TIME_FW_KEY)
+/*
+ * Encrypt fw key.
+ *
+ * \param[in]  plain_key             Key buffer to encrypt
+ * \param[out] encrypted_fw_key      Buffer holding the encrypted data
+ * \param[out] encrypted_fw_key_tag  Buffer holding the encrypted tag
+ * \param[out] encrypted_fw_key_iv   Buffer holding the encrypted buffer
+ * \return FOTA_STATUS_SUCCESS on success
+ */
+int fota_encrypt_fw_key(uint8_t plain_key[FOTA_ENCRYPT_KEY_SIZE],
+                        uint8_t encrypted_fw_key[FOTA_ENCRYPT_KEY_SIZE],
+                        uint8_t encrypted_fw_key_tag[FOTA_ENCRYPT_TAG_SIZE],
+                        uint64_t *encrypted_fw_key_iv);
+/*
+ * Decrypt fw key.
+ *
+ * \param[out] plain_key             Key buffer to encrypt
+ * \param[in]  encrypted_fw_key      Buffer holding the encrypted data
+ * \param[in]  encrypted_fw_key_tag  Buffer holding the encrypted tag
+ * \param[in]  encrypted_fw_key_iv   Buffer holding the encrypted buffer
+ * \return FOTA_STATUS_SUCCESS on success
+ */
+int fota_decrypt_fw_key(uint8_t plain_key[FOTA_ENCRYPT_KEY_SIZE],
+                        uint8_t encrypted_fw_key[FOTA_ENCRYPT_KEY_SIZE],
+                        uint8_t encrypted_fw_key_tag[FOTA_ENCRYPT_TAG_SIZE],
+                        uint64_t encrypted_fw_key_iv);
+#endif // (MBED_CLOUD_CLIENT_FOTA_KEY_ENCRYPTION == FOTA_USE_ENCRYPTED_ONE_TIME_FW_KEY)
+
 typedef struct fota_hash_context_s fota_hash_context_t;
 
 int fota_hash_start(fota_hash_context_t **ctx);
 int fota_hash_update(fota_hash_context_t *ctx, const uint8_t *buf, uint32_t buf_size);
+void fota_hash_clone(fota_hash_context_t *dst_ctx, const fota_hash_context_t *src_ctx);
 int fota_hash_result(fota_hash_context_t *ctx, uint8_t *hash_buf);
 void fota_hash_finish(fota_hash_context_t **ctx);
 
@@ -93,6 +123,16 @@ do { \
     FOTA_FI_SAFE_COND((!fota_fi_memcmp((PTR1), (PTR2), (NUM), &loop_check) && (loop_check == (NUM))), RET, MSG, ##__VA_ARGS__); \
 } while (0)
 
+static inline void* fota_fi_memcpy(void *dst, const void *src, size_t num)
+{
+    return mbedtls_platform_memcpy(dst, src, num);
+}
+
+static inline void* fota_fi_memset(void *ptr, int value, size_t num)
+{
+    return mbedtls_platform_memset(ptr, value, num);
+}
+
 #else // no FI support
 
 // No FI mitigation, simple handling
@@ -115,6 +155,16 @@ static inline int fota_fi_memcmp(const uint8_t *ptr1, const uint8_t *ptr2, size_
     return memcmp(ptr1, ptr2, num);
 }
 
+static inline void* fota_fi_memcpy(void *dst, const void *src, size_t num)
+{
+    return memcpy(dst, src, num);
+}
+
+static inline void* fota_fi_memset(void *ptr, int value, size_t num)
+{
+    return memset(ptr, value, num);
+}
+
 #endif // #if FOTA_FI_MITIGATION_ENABLE
 
 int fota_verify_signature(
@@ -127,11 +177,12 @@ int fota_verify_signature_prehashed(
     const uint8_t *sig, size_t sig_len
 );
 
+const unsigned char* fota_get_derivation_string(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
+#endif // defined(MBED_CLOUD_CLIENT_FOTA_ENABLE)
 
 #endif // __FOTA_CRYPTO_H_

@@ -66,7 +66,10 @@ typedef enum registry_notification_status_e {
     NOTIFICATION_STATUS_DELIVERED,          ///< Received ACK from server.
     NOTIFICATION_STATUS_SEND_FAILED,        ///< Message sending failed (retransmission completed).
     NOTIFICATION_STATUS_SUBSCRIBED,         ///< Server has started the observation.
-    NOTIFICATION_STATUS_UNSUBSCRIBED        ///< Server has stopped the observation (RESET message or GET with observe 1).
+    NOTIFICATION_STATUS_UNSUBSCRIBED,       ///< Server has stopped the observation (RESET message or GET with observe 1).
+#ifdef MBED_CLOUD_CLIENT_DISABLE_REGISTRY
+    NOTIFICATION_STATUS_NOT_REGISTERED,     ///< Failed due to not being registered
+#endif
 } registry_notification_status_t;
 
 /**
