@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2020 ARM Ltd.
+// Copyright 2019-2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
+#include <assert.h>
 #include "fota/fota_config.h"
 #ifdef __cplusplus
 extern "C" {
@@ -75,7 +76,14 @@ extern "C" {
 #endif
 
 #if !defined(FOTA_HALT)
+#if defined(FOTA_UNIT_TEST)
+void unitest_halt(void);
+#define FOTA_HALT unitest_halt()
+#elif defined(TARGET_LIKE_LINUX)
+#define FOTA_HALT assert(0)
+#else
 #define FOTA_HALT for(;;)
+#endif
 #endif
 
 #define FOTA_ASSERT(COND) { \
@@ -94,6 +102,14 @@ extern "C" {
 #define FOTA_ALIGN_UP(val, size)  (((((val) - 1) / (size)) + 1) * (size))
 
 #define FOTA_ALIGN_DOWN(val, size)  ((val) / (size) * (size))
+
+
+#if defined(__GNUC__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define FOTA_UINT64_TO_LE  __builtin_bswap64
+#else
+#define FOTA_UINT64_TO_LE
+#endif
+
 
 #ifdef __cplusplus
 }

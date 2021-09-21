@@ -32,10 +32,30 @@ extern "C" {
 #else
     #define protoman_verbose(...)
 #endif
+
+#if MBED_TRACE_MAX_LEVEL >= TRACE_LEVEL_DEBUG
 #define protoman_debug(...)   protoman_tracef(TRACE_LEVEL_DEBUG, __VA_ARGS__, "")
+#else
+#define protoman_debug(...)
+#endif
+
+#if MBED_TRACE_MAX_LEVEL >= TRACE_LEVEL_WARN
 #define protoman_warn(...)    protoman_tracef(TRACE_LEVEL_WARN, __VA_ARGS__, "")
+#else
+#define protoman_warn(...)
+#endif
+
+#if MBED_TRACE_MAX_LEVEL >= TRACE_LEVEL_INFO
 #define protoman_info(...)    protoman_tracef(TRACE_LEVEL_INFO, __VA_ARGS__, "")
+#else
+#define protoman_info(...)
+#endif
+
+#if MBED_TRACE_MAX_LEVEL >= TRACE_LEVEL_ERROR
 #define protoman_err(...)     protoman_tracef(TRACE_LEVEL_ERROR, __VA_ARGS__, "")
+#else
+#define protoman_err(...)
+#endif
 
 #ifdef PROTOMAN_VERBOSE_POINTERS
     /* Verbose logs */

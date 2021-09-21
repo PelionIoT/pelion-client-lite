@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2020 ARM Ltd.
+// Copyright 2019-2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -24,37 +24,48 @@
 
 #include "fota/fota_block_device.h"
 #include "fota/fota_status.h"
+#include <stdlib.h>
+
+#if FOTA_BD_SIMULATE_ERASE
+static const uint8_t sim_erase_val = 0xFF;
+#endif
 
 // External BD should supply all these APIs
 
 #if (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE != FOTA_EXTERNAL_BD)
+#if defined(__MBED__)
 
 static bool initialized = false;
 
 #include "BlockDevice.h"
 
-#if (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_INTERNAL_FLASH_BD)
+#if (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_INTERNAL_FLASH_MBED_OS_BD)
 #if COMPONENT_FLASHIAP
 #include "FlashIAPBlockDevice.h"
 #else
 #error FlashIAP component should be defined in case of an internal flash block device configuration
 #endif
-#endif // (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_INTERNAL_FLASH_BD)
+#endif // (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_INTERNAL_FLASH_MBED_OS_BD)
 
 #include <string.h>
 
 static mbed::BlockDevice *bd = 0;
 
-#if (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_CUSTOM_BD)
-// In custom BD case, the user code should supply this function, returning the desired block device
+#if (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_CUSTOM_MBED_OS_BD)
+// Should be supplied by application
 mbed::BlockDevice *fota_bd_get_custom_bd();
-#elif (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_INTERNAL_FLASH_BD)
+#else //FOTA_INTERNAL_FLASH_MBED_OS_BD or FOTA_DEFAULT_MBED_OS_BD
 mbed::BlockDevice *fota_bd_get_custom_bd()
 {
+#if (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_INTERNAL_FLASH_MBED_OS_BD)
     if (!bd) {
         bd = new FlashIAPBlockDevice(MBED_ROM_START, MBED_ROM_SIZE);
     }
     return bd;
+
+#elif (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_DEFAULT_MBED_OS_BD)
+    return mbed::BlockDevice::get_default_instance();
+#endif
 }
 #endif
 
@@ -84,6 +95,7 @@ int fota_bd_init(void)
 
     int ret = bd->init();
     if (!ret) {
+        FOTA_TRACE_DEBUG("BlockDevice type %s", bd->get_type());
         initialized = true;
         return FOTA_STATUS_SUCCESS;
     }
@@ -98,7 +110,7 @@ int fota_bd_deinit(void)
     }
 
     int ret = bd->deinit();
-#if (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_INTERNAL_FLASH_BD)
+#if (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_INTERNAL_FLASH_MBED_OS_BD)
     delete bd;
 #endif
     bd = 0;
@@ -139,6 +151,46 @@ int fota_bd_erase(size_t addr, size_t size)
     int ret;
     FOTA_ASSERT(bd);
 
+#if FOTA_BD_SIMULATE_ERASE
+    int erase_value = bd->get_erase_value();
+    if (erase_value < 0) {
+        uint8_t *erase_buf = NULL;
+        while (size) {
+            size_t erase_size, prev_erase_size = 0;
+            if (fota_bd_get_erase_size(addr, &erase_size)) {
+                ret = FOTA_STATUS_STORAGE_WRITE_FAILED;
+                goto end;
+            }
+            if ((addr % erase_size) || (size < erase_size)) {
+                ret = FOTA_STATUS_STORAGE_WRITE_FAILED;
+                goto end;
+            }
+
+            if (erase_size > prev_erase_size) {
+                free(erase_buf);
+                erase_buf = (uint8_t *) malloc(erase_size);
+                if (!erase_buf) {
+                    ret = FOTA_STATUS_STORAGE_WRITE_FAILED;
+                    goto end;
+                }
+            }
+
+            memset(erase_buf, sim_erase_val, erase_size);
+            if (bd->program(erase_buf, addr, erase_size)) {
+                ret = FOTA_STATUS_STORAGE_WRITE_FAILED;
+                goto end;
+            }
+            prev_erase_size = erase_size;
+            addr += erase_size;
+            size -= erase_size;
+        }
+        ret = FOTA_STATUS_SUCCESS;
+end:
+        free(erase_buf);
+        return ret;
+    }
+#endif // FOTA_BD_SIMULATE_ERASE
+
     ret = bd->erase(addr, size);
     if (ret) {
         return FOTA_STATUS_STORAGE_WRITE_FAILED;
@@ -175,20 +227,21 @@ int fota_bd_get_erase_value(int *erase_value)
     FOTA_ASSERT(bd);
 
     *erase_value = bd->get_erase_value();
+
+#if FOTA_BD_SIMULATE_ERASE
+    if (*erase_value < 0) {
+        *erase_value = sim_erase_val;
+    }
+#endif
+
     return FOTA_STATUS_SUCCESS;
 }
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif // (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE != FOTA_EXTERNAL_BD)
-
 static bool is_internal_flash_bd()
 {
-#if (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_INTERNAL_FLASH_BD)
+#if (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_INTERNAL_FLASH_MBED_OS_BD)
     return true;
-#elif (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_CUSTOM_BD)
+#elif (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE == FOTA_CUSTOM_MBED_OS_BD)
     FOTA_ASSERT(bd);
     const char *bd_type = bd->get_type();
     if (strcmp("FLASHIAP", bd_type) == 0) {
@@ -200,7 +253,7 @@ static bool is_internal_flash_bd()
 #endif
 }
 
-extern "C" size_t fota_bd_physical_addr_to_logical_addr(size_t phys_addr)
+size_t fota_bd_physical_addr_to_logical_addr(size_t phys_addr)
 {
 #ifdef __MBED__
     if (is_internal_flash_bd()) {
@@ -210,4 +263,10 @@ extern "C" size_t fota_bd_physical_addr_to_logical_addr(size_t phys_addr)
     return phys_addr;
 }
 
+#ifdef __cplusplus
+}
+#endif
+
+#endif // defined(__MBED__)
+#endif // (MBED_CLOUD_CLIENT_FOTA_BLOCK_DEVICE_TYPE != FOTA_EXTERNAL_BD)
 #endif  // MBED_CLOUD_CLIENT_FOTA_ENABLE

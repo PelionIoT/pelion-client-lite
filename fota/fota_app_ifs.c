@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2020 ARM Ltd.
+// Copyright 2019-2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -30,45 +30,38 @@
 
 #include <inttypes.h>
 
-void fota_app_authorize_update()
+#if defined(TARGET_LIKE_LINUX)
+#include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>
+#endif // defined(TARGET_LIKE_LINUX)
+
+void fota_app_authorize()
 {
-    fota_event_handler_defer_with_result(fota_on_authorize, 0);
+    fota_event_handler_defer_with_result(fota_on_authorize, FOTA_INSTALL_STATE_AUTHORIZE /*This parameter is relevant only to the FOTA install stage.*/);
 }
 
-void fota_app_authorize(uint32_t token)
-{
-    (void) token;
-    fota_app_authorize_update();
-}
-
-void fota_app_reject_update(int32_t reason)
+void fota_app_reject(int32_t reason)
 {
     fota_event_handler_defer_with_result(fota_on_reject, reason);
 }
 
-void fota_app_reject(uint32_t token, int32_t reason)
+void fota_app_defer()
 {
-    (void) token;
-    fota_app_reject_update(reason);
+    fota_event_handler_defer_with_result(fota_on_defer, FOTA_INSTALL_STATE_DEFER /*This parameter is relevant only to the FOTA install stage.*/);
 }
 
-void fota_app_defer_update()
+void fota_app_postpone_reboot()
 {
-    fota_event_handler_defer_with_result(fota_on_defer, 0);
-}
-
-void fota_app_defer(uint32_t token)
-{
-    (void) token;
-    fota_app_defer_update();
+     fota_event_handler_defer_with_result(fota_on_defer, FOTA_INSTALL_STATE_POSTPONE_REBOOT /*This parameter is relevant only to the FOTA install stage.*/);  
 }
 
 void fota_app_resume(void)
 {
-    fota_event_handler_defer_with_result_ignore_busy(fota_on_resume, 0);
+    fota_event_handler_defer_with_result_ignore_busy(fota_on_resume, /*fota resume by user app */ 0);
 }
 
-#if FOTA_DEFAULT_APP_IFS
+#if defined (FOTA_DEFAULT_APP_IFS) && FOTA_DEFAULT_APP_IFS==1
 void fota_app_on_download_progress(size_t downloaded_size, size_t current_chunk_size, size_t total_size)
 {
     FOTA_ASSERT(total_size);
@@ -103,13 +96,12 @@ int fota_app_on_complete(int32_t status)
     The user application is supposed to save all current work
     before rebooting.
 
-    Note: the authorization call can be postponed and called later.
+    Note: The authorization call can be deferred and called later.
     This doesn't affect the performance of the Cloud Client.
 */
-int fota_app_on_install_authorization(uint32_t token)
+int fota_app_on_install_authorization(void)
 {
-    (void) token; // unused;
-    fota_app_authorize_update();
+    fota_app_authorize();
     FOTA_APP_PRINT("Install authorization granted");
     return FOTA_STATUS_SUCCESS;
 }
@@ -125,12 +117,10 @@ int fota_app_on_install_authorization(uint32_t token)
     This doesn't affect the performance of the Cloud Client.
 */
 int fota_app_on_download_authorization(
-    uint32_t token,
     const manifest_firmware_info_t *candidate_info,
     fota_component_version_t curr_fw_version
 )
 {
-    (void) token; // unused;
     char curr_semver[FOTA_COMPONENT_MAX_SEMVER_STR_SIZE] = { 0 };
     char new_semver[FOTA_COMPONENT_MAX_SEMVER_STR_SIZE] = { 0 };
     fota_component_version_int_to_semver(curr_fw_version, curr_semver);
@@ -149,22 +139,62 @@ int fota_app_on_download_authorization(
             candidate_info->payload_size,
             candidate_info->installed_size
         );
+    } else if (candidate_info->payload_format == FOTA_MANIFEST_PAYLOAD_FORMAT_ENCRYPTED_RAW) {
+        FOTA_APP_PRINT("Update size %zuB (Encrypted image size %zuB)",
+            candidate_info->installed_size,
+            candidate_info->payload_size
+        );
     } else {
         FOTA_APP_PRINT("Update size %zuB", candidate_info->payload_size);
     }
     FOTA_APP_PRINT("---------------------------------------------------");
     FOTA_APP_PRINT("Download authorization granted");
-    fota_app_authorize_update();
+    fota_app_authorize();
     /* Application can reject an update in the following way
-        fota_app_reject_update(127);
+        fota_app_reject(127);
         Reason error code will be logged.
        Alternatively application can defer the update by calling
-        fota_app_defer_update();
+        fota_app_defer();
        Deferred update will be restarted on next boot or by calling fota_app_resume() API.
 
     */
     return FOTA_STATUS_SUCCESS;
 }
-#endif // FOTA_DEFAULT_APP_IFS
+#endif // #if defined (FOTA_DEFAULT_APP_IFS) && FOTA_DEFAULT_APP_IFS==1
+
+#if defined(TARGET_LIKE_LINUX)
+#if defined(MBED_CLOUD_CLIENT_FOTA_LINUX_SINGLE_MAIN_FILE)
+
+int fota_app_install_main_app(const char *candidate_file_name)
+{
+    unsigned int file_mode = ALLPERMS;
+    struct stat statbuf;
+
+    FOTA_TRACE_INFO("Installing MAIN application");
+
+    // get current file permissions
+    if (stat(MBED_CLOUD_CLIENT_FOTA_LINUX_CURR_FW_FILENAME, &statbuf) == 0) {
+        file_mode = statbuf.st_mode & 0x1FF;
+    }
+
+    // unlink current file
+    if (unlink(MBED_CLOUD_CLIENT_FOTA_LINUX_CURR_FW_FILENAME) != 0) {
+        FOTA_TRACE_ERROR("Failed to unlink file %s: %s", MBED_CLOUD_CLIENT_FOTA_LINUX_CURR_FW_FILENAME, strerror(errno));
+        return FOTA_STATUS_INTERNAL_ERROR;
+    }
+
+    // change file permission to same as previously
+    chmod(candidate_file_name, file_mode);
+
+    if (rename(candidate_file_name, MBED_CLOUD_CLIENT_FOTA_LINUX_CURR_FW_FILENAME) != 0) {
+        FOTA_TRACE_ERROR("Failed to rename file %s: %s", candidate_file_name, strerror(errno));
+        return FOTA_STATUS_INTERNAL_ERROR;
+    }
+
+    return FOTA_STATUS_SUCCESS;
+}
+
+#endif  // defined(MBED_CLOUD_CLIENT_FOTA_LINUX_SINGLE_MAIN_FILE)
+#endif  // defined(TARGET_LIKE_LINUX)
 
 #endif  // MBED_CLOUD_CLIENT_FOTA_ENABLE

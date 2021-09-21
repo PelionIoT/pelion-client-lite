@@ -87,6 +87,8 @@ typedef struct connection_s {
 
     int8_t event_handler_id;
 
+    bool initialized;
+
 } connection_t;
 
 #define CONNECTION_STATUS_WOULD_BLOCK 1 ///< No more data available.
@@ -128,6 +130,7 @@ typedef struct connection_s {
  * \param key Pointer to the certificate or PSK Key.
  * \param key_len Length of the `key`.
  * \param bootstrap Authenticating against BS or LwM2M
+ * \param ignore_session_resume if true, does not use stored ssl session
  *
  * \return CONNECTION_STATUS_OK Initialization done.
  * \return CONNECTION_STATUS_ERROR_GENERIC Initialization failed.
@@ -137,6 +140,9 @@ int8_t connection_init(connection_t *connection, void(*event_handler)(connection
                        const uint8_t *ca_cert, uint16_t ca_cert_len, const uint8_t *cert, uint16_t cert_len, const uint8_t *key, uint16_t key_len
 #if defined(PROTOMAN_USE_SSL_SESSION_RESUME) || defined(PROTOMAN_OFFLOAD_TLS)
                        , bool bootstrap
+#endif
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+                       , bool ignore_session_resume
 #endif
                        );
 
@@ -155,7 +161,7 @@ void connection_destroy(connection_t *connection);
  *
  * \note After calling this function, other connection calls must not be done before calling `connection_init` again.
  *
- * \param connection Pointer to the connection to be destroyed.
+ * \param connection Pointer to the connection to be closed.
  */
 void connection_close(connection_t *connection);
 
@@ -163,18 +169,25 @@ void connection_close(connection_t *connection);
  * \brief Try to establish connection using the parameters set with `connection_init`.
  *
  * \param connection Pointer to the connection to be started.
+ *
+ * \return false if connection is not initialized and protoman call is skipped.
+ * \return true  if connection is initialized.
  */
-void connection_start(connection_t *connection);
+bool connection_start(connection_t *connection);
 
 /**
  * \brief Close the connection. The connection can be opened again.
  *
  * \param connection Pointer to the connection to be closed.
+ *
+ * \return false if connection is not initialized and protoman call is skipped.
+ * \return true  if connection is initialized.
  */
-void connection_stop(connection_t *connection);
+bool connection_stop(connection_t *connection);
 
-void connection_pause(connection_t *connection);
-void connection_resume(connection_t *connection);
+bool connection_pause(connection_t *connection);
+
+bool connection_resume(connection_t *connection);
 
 
 /**
@@ -244,6 +257,35 @@ int8_t connection_protoman_layers_init(struct connection_s *connection, char *ho
                                        ,bool bootstrap
 #endif
                                        );
+/**
+ * \brief Internal test function. Set CID for current tls session.
+ * 
+ * \param connection Secure connection.
+ * \param data_ptr CID
+ * \param data_len length of the CID
+ */
+void set_cid_value(struct connection_s *connection, const uint8_t *data_ptr, const size_t data_len);
+
+/**
+ * \brief Internal test function. Store CID to storage
+ * 
+ * \param connection Secure connection.
+ */
+void store_connection_id(struct connection_s *connection);
+
+/**
+ * \brief Internal test function. Remove CID from storage and from RAM
+ * 
+ * \param connection Secure connection.
+ */
+void remove_connection_id(struct connection_s *connection);
+
+/**
+ *  \brief Check if tls connection id is available
+ *
+ * \return true if connection id is available
+ */
+bool is_connection_id_available();
 
 #ifdef __cplusplus
 }

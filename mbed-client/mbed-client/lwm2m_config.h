@@ -203,10 +203,6 @@ typedef struct mbedtls_entropy {
     int     strong;
 }entropy_cb;
 
-#ifdef MBED_CLIENT_USER_CONFIG_FILE
-#include MBED_CLIENT_USER_CONFIG_FILE
-#endif
-
 #ifdef MBED_CLOUD_CLIENT_USER_CONFIG_FILE
 #include MBED_CLOUD_CLIENT_USER_CONFIG_FILE
 #endif

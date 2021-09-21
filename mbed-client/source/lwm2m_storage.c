@@ -249,7 +249,7 @@ const void *storage_read_certificate(size_t *buffer_size, bool bootstrap)
         temp_p = allocate_and_read_connectivity_parameter(LWM2M_DEVICE_CERTIFICATE, &lwm2m_certificate, buffer_size, bootstrap);
     }
     if (!temp_p) {
-        tr_error("storage_read_certificate() failed");
+        tr_error("read_certificate() failed");
     }
     return temp_p;
 }
@@ -266,7 +266,7 @@ const void *storage_read_certificate_key(size_t *buffer_size, bool bootstrap)
         temp_p = allocate_and_read_connectivity_parameter(LWM2M_DEVICE_PRIVATE_KEY, &lwm2m_certificate_key, buffer_size, bootstrap);
     }
     if (!temp_p) {
-        tr_error("storage_read_certificate_key() failed");
+        tr_error("read_certificate_key() failed");
     }
     return temp_p;
 }
@@ -285,7 +285,7 @@ const void *storage_read_ca_certificate(size_t *buffer_size, bool bootstrap)
 
     }
     if (!temp_p) {
-        tr_error("storage_read_ca_certificate() failed");
+        tr_error("read_ca_certificate() failed");
     }
     return temp_p;
 }
@@ -304,17 +304,17 @@ bool storage_set_credentials(registry_t *registry)
 #endif //defined(PROTOMAN_SECURITY_ENABLE_CERTIFICATE)
     const char *server_uri;
     int64_t security;
-    tr_debug("storage_set_credentials()");
+    tr_debug("set_credentials()");
 
     registry_set_path(&path, M2M_SECURITY_ID, 0, SECURITY_M2M_SERVER_URI, 0, REGISTRY_PATH_OBJECT_INSTANCE);
     if (REGISTRY_STATUS_OK != registry_path_exists(registry, &path)) {
-        tr_info("storage_set_credentials() No credentials available.");
+        tr_info("set_credentials() No credentials available");
         return false;
     }
 
     registry_set_path(&path, M2M_SECURITY_ID, 0, SECURITY_SECURITY_MODE, 0, REGISTRY_PATH_RESOURCE);
     if (REGISTRY_STATUS_OK != registry_get_value_int(registry, &path, &security)) {
-        tr_error("storage_set_credentials() No security mode set.");
+        tr_error("set_credentials() No security mode set");
         return false;
     }
 
@@ -326,13 +326,13 @@ bool storage_set_credentials(registry_t *registry)
 #ifndef PROTOMAN_OFFLOAD_TLS
         registry_set_path(&path, M2M_SECURITY_ID, 0, SECURITY_PUBLIC_KEY, 0, REGISTRY_PATH_RESOURCE);
         if (REGISTRY_STATUS_OK != registry_get_value_opaque(registry, &path, &public_key)) {
-            tr_error("storage_set_credentials() registry_get_value_opaque public_key failed");
+            tr_error("set_credentials() registry_get_value_opaque public_key failed");
             return false;
         }
 
         registry_set_path(&path, M2M_SECURITY_ID, 0, SECURITY_SECRET_KEY, 0, REGISTRY_PATH_RESOURCE);
         if (REGISTRY_STATUS_OK != registry_get_value_opaque(registry, &path, &sec_key)) {
-            tr_error("storage_set_credentials() registry_get_value_opaque sec_key failed");
+            tr_error("set_credentials() registry_get_value_opaque sec_key failed");
             return false;
         }
 #endif
@@ -344,7 +344,7 @@ bool storage_set_credentials(registry_t *registry)
 #ifndef PROTOMAN_OFFLOAD_TLS
         registry_set_path(&path, M2M_SECURITY_ID, 0, SECURITY_SERVER_PUBLIC_KEY, 0, REGISTRY_PATH_RESOURCE);
         if (REGISTRY_STATUS_OK != registry_get_value_opaque(registry, &path, &ca_cert)) {
-            tr_error("storage_set_credentials() registry_get_value_opaque sec_key failed");
+            tr_error("set_credentials() registry_get_value_opaque sec_key failed");
             return false;
         }
 #endif
@@ -362,12 +362,12 @@ bool storage_set_credentials(registry_t *registry)
 #if defined(PROTOMAN_SECURITY_ENABLE_PSK)
     if (security == 0) {
         if (set_config_parameter(LWM2M_SERVER_PSK_IDENTITY, public_key->data, public_key->size) != CCS_STATUS_SUCCESS) {
-            tr_error("storage_set_credentials() set_config_parameter public_key failed");
+            tr_error("set_credentials() set_config_parameter public_key failed");
             return false;
         }
 
         if (set_config_parameter(LWM2M_SERVER_PSK_SECRET, sec_key->data, sec_key->size) != CCS_STATUS_SUCCESS) {
-            tr_error("storage_set_credentials() set_config_parameter sec_key failed");
+            tr_error("set_credentials() set_config_parameter sec_key failed");
             return false;
         }
     }
@@ -376,17 +376,17 @@ bool storage_set_credentials(registry_t *registry)
     if (security == 2) {
 #ifndef PROTOMAN_OFFLOAD_TLS
         if (set_config_parameter(LWM2M_DEVICE_CERTIFICATE, public_key->data, public_key->size) != CCS_STATUS_SUCCESS) {
-            tr_error("storage_set_credentials() set_config_parameter public_key failed");
+            tr_error("set_credentials() set_config_parameter public_key failed");
             return false;
         }
 
         if (set_config_parameter(LWM2M_SERVER_ROOT_CA_CERTIFICATE, ca_cert->data, ca_cert->size) != CCS_STATUS_SUCCESS) {
-            tr_error("storage_set_credentials() set_config_parameter ca_cert failed");
+            tr_error("set_credentials() set_config_parameter ca_cert failed");
             return false;
         }
 
         if (set_config_parameter(LWM2M_DEVICE_PRIVATE_KEY, sec_key->data, sec_key->size) != CCS_STATUS_SUCCESS) {
-            tr_error("storage_set_credentials() set_config_parameter sec_key failed");
+            tr_error("set_credentials() set_config_parameter sec_key failed");
             return false;
         }
 #endif
@@ -394,13 +394,13 @@ bool storage_set_credentials(registry_t *registry)
 #endif //defined(PROTOMAN_SECURITY_ENABLE_CERTIFICATE)
 
     if (set_config_parameter(LWM2M_SERVER_URI, (const uint8_t*)server_uri, strlen(server_uri)) != CCS_STATUS_SUCCESS) {
-        tr_error("storage_set_credentials() set_config_parameter server_uri failed");
+        tr_error("set_credentials() set_config_parameter server_uri failed");
         return false;
     }
 
 #ifndef MBED_CONF_MBED_CLIENT_DISABLE_BOOTSTRAP_FEATURE
     if (security == 0 || security == 2) {
-        tr_info("storage_set_credentials() set_config_parameter ok");
+        tr_info("set_credentials() set_config_parameter ok");
         const char *iep_ptr = NULL;
         const int iep_len = parse_query_parameter_value_from_query(server_uri, "iep", &iep_ptr);
         if (iep_ptr && iep_len > 0) {
@@ -426,17 +426,17 @@ bool storage_clear_credentials(registry_t *registry)
     int64_t security;
     registry_set_path(&path, M2M_SECURITY_ID, 0, SECURITY_SECURITY_MODE, 0, REGISTRY_PATH_RESOURCE);
     if (REGISTRY_STATUS_OK != registry_get_value_int(registry, &path, &security)) {
-        tr_error("storage_clear_credentials() No security mode set.");
+        tr_error("clear_credentials() No security mode set");
         return false;
     }
 
 #if defined(PROTOMAN_SECURITY_ENABLE_PSK)
     if (security == 0) {
         if (remove_config_parameter(LWM2M_SERVER_PSK_IDENTITY) != CCS_STATUS_SUCCESS) {
-            tr_error("storage_clear_credentials() remove_config_parameter public_key failed");
+            tr_error("clear_credentials() remove_config_parameter public_key failed");
         }
         if (remove_config_parameter(LWM2M_SERVER_PSK_SECRET, sec_key->data, sec_key->size) != CCS_STATUS_SUCCESS) {
-            tr_error("storage_clear_credentials() remove_config_parameter sec_key failed");
+            tr_error("clear_credentials() remove_config_parameter sec_key failed");
         }
     }
 #endif //defined(PROTOMAN_SECURITY_ENABLE_PSK)
@@ -444,20 +444,20 @@ bool storage_clear_credentials(registry_t *registry)
     if (security == 2) {
 #ifndef PROTOMAN_OFFLOAD_TLS
         if (remove_config_parameter(LWM2M_DEVICE_CERTIFICATE) != CCS_STATUS_SUCCESS) {
-            tr_error("storage_clear_credentials() remove_config_parameter public_key failed");
+            tr_error("clear_credentials() remove_config_parameter public_key failed");
         }
         if (remove_config_parameter(LWM2M_SERVER_ROOT_CA_CERTIFICATE) != CCS_STATUS_SUCCESS) {
-            tr_error("storage_clear_credentials() remove_config_parameter ca_cert failed");
+            tr_error("clear_credentials() remove_config_parameter ca_cert failed");
         }
         if (remove_config_parameter(LWM2M_DEVICE_PRIVATE_KEY) != CCS_STATUS_SUCCESS) {
-            tr_error("storage_clear_credentials() remove_config_parameter sec_key failed");
+            tr_error("clear_credentials() remove_config_parameter sec_key failed");
         }
 #endif
     }
 #endif //defined(PROTOMAN_SECURITY_ENABLE_CERTIFICATE)
 
     if (remove_config_parameter(LWM2M_SERVER_URI) != CCS_STATUS_SUCCESS) {
-        tr_error("storage_clear_credentials() remove_config_parameter server_uri failed");
+        tr_error("clear_credentials() remove_config_parameter server_uri failed");
     }
     return true;
 }
@@ -508,7 +508,7 @@ bool storage_set_bootstrap_credentials(registry_t *registry)
 
     return true;
 #else
-    tr_error("set_bootstrap_credentials() Redirecting bootstrap not supported.");
+    tr_error("set_bootstrap_credentials() Redirecting bootstrap not supported");
     return false;
 #endif //defined(PROTOMAN_SECURITY_ENABLE_PSK)
 }
@@ -517,7 +517,7 @@ bool storage_set_bootstrap_credentials(registry_t *registry)
 bool storage_set_internal_endpoint_name(const char *iep)
 {
     if (!iep || (set_config_parameter(INTERNAL_ENDPOINT, (const uint8_t*) iep, strlen(iep)) != CCS_STATUS_SUCCESS)) {
-        tr_error("storage_set_internal_endpoint_name() setting iep failed");
+        tr_error("set_internal_endpoint_name() setting iep failed");
         return false;
     }
 

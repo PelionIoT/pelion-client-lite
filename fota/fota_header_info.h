@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2020 ARM Ltd.
+// Copyright 2019-2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -21,7 +21,7 @@
 
 #include "fota/fota_base.h"
 
-#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+#if defined(MBED_CLOUD_CLIENT_FOTA_ENABLE)
 
 #include "fota/fota_crypto_defs.h"
 #include "fota/fota_component_defs.h"
@@ -32,14 +32,13 @@ extern "C" {
 #endif
 
 // These checks are only relevant when FOTA is enabled (unlike this header file)
-#ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
+
 #if !defined(MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION)
 #error MBED_CLOUD_CLIENT_FOTA_FW_HEADER_VERSION expected to be set in fota_config.h
 #endif
 
 #if !defined(FOTA_HEADER_HAS_CANDIDATE_READY)
 #error FOTA_HEADER_HAS_CANDIDATE_READY expected to be set in fota_config.h
-#endif
 #endif
 
 #define FOTA_FW_HEADER_MAGIC ((uint32_t)(0x5c0253a3))
@@ -61,8 +60,9 @@ typedef struct {
     uint32_t footer;
 } fota_candidate_ready_header_t;
 
-#define FOTA_HEADER_ENCRYPTED_FLAG              0x01
-#define FOTA_HEADER_SUPPORT_RESUME_FLAG         0x02
+#define FOTA_HEADER_ENCRYPTED_FLAG               0x01
+#define FOTA_HEADER_SUPPORT_RESUME_FLAG          0x02
+#define FOTA_INTERNAL_HEADER_RESERVED_FIELD_SIZE 0x40
 
 /*
  * FW header as found in flash.
@@ -72,22 +72,38 @@ typedef struct {
  * module for reporting current version details.
  */
 typedef struct {
-    uint32_t magic;                                 /*< Magic value */
-    size_t fw_size;                                 /*< FW size in bytes */
-    uint64_t version;                               /*< FW version - timestamp */
+    uint32_t magic;                                     /*< Magic value */
+    uint32_t fw_size;                                   /*< FW size in bytes */
+    uint64_t version;                                   /*< FW version - timestamp */
 #if defined(MBED_CLOUD_CLIENT_FOTA_SIGNED_IMAGE_SUPPORT)
-    uint8_t signature[FOTA_IMAGE_RAW_SIGNATURE_SIZE]; /*< RAW ECDSA signature */
+    uint8_t signature[FOTA_IMAGE_RAW_SIGNATURE_SIZE];   /*< RAW ECDSA signature */
 #endif  // defined(MBED_CLOUD_CLIENT_FOTA_SIGNED_IMAGE_SUPPORT)
-    uint8_t digest[FOTA_CRYPTO_HASH_SIZE];          /*< FW image SHA256 digest */
+    uint8_t digest[FOTA_CRYPTO_HASH_SIZE];              /*< FW image SHA256 digest */
+    uint8_t reserved[FOTA_INTERNAL_HEADER_RESERVED_FIELD_SIZE];    /*< Reserved */
 
     // From this point on, all fields are relevant to candidate only and
     // can be skipped by bootloader if it wishes not to save them internally
+    // !The size of the internal header can't be changed, different size of the header 
+    // will break older version of the bootloader.
+    // reserved field should be used for additional internal header data.
     uint8_t internal_header_barrier;
     uint8_t flags;                                  /*< Flags */
+    uint16_t external_header_size;                  /*< Size of external header size */
     uint16_t block_size;                            /*< Block size. Encryption block size if encrypted,
                                                         validated block size if unencrypted and block validation turned on */
     uint8_t precursor[FOTA_CRYPTO_HASH_SIZE];       /*< contains previously installed FW SHA256 digest */
+    /*< Vendor custom data as received in Pelion FOTA manifest. */
+    uint8_t vendor_data[FOTA_MANIFEST_VENDOR_DATA_SIZE];
+#if (MBED_CLOUD_CLIENT_FOTA_KEY_ENCRYPTION == FOTA_USE_ENCRYPTED_ONE_TIME_FW_KEY)
+    /*< Encrypted info to encrypt\decrypt payload Encryption key */
+    uint8_t encrypted_fw_key[FOTA_ENCRYPT_KEY_SIZE];
+    uint8_t encrypted_fw_key_tag[FOTA_ENCRYPT_TAG_SIZE];
+    uint64_t encrypted_fw_key_iv;
+#endif
     uint32_t footer;
+    // !New fields of the external header must me added in the end of the current structure,
+    // otherwise additional field will break older version of the bootloader.
+
 } fota_header_info_t;
 
 static inline size_t fota_get_header_size(void)
@@ -124,5 +140,5 @@ int fota_serialize_header(const fota_header_info_t *header_info, uint8_t *header
 }
 #endif
 
-#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
+#endif // defined(MBED_CLOUD_CLIENT_FOTA_ENABLE)
 #endif // __FOTA_HEADER_INFO_H_

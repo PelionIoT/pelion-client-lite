@@ -35,7 +35,7 @@
 
 # Set the mbed TLS release to import (this can/should be edited before import)
 MBED_TLS_RELEASE ?= baremetal
-MBED_TLS_REPO_URL ?= git@github.com:ARMmbed/mbedtls.git
+MBED_TLS_REPO_URL ?= git@github.com:PelionIoT/pelion-crypto.git
 
 # Translate between mbed TLS namespace and mbed namespace
 TARGET_PREFIX:=../

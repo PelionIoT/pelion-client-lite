@@ -18,8 +18,8 @@
 if [ ! -d "../mbedtls" ]
 then
     cd ..
-    MBEDTLS_HASH="858e4325d2eb55274950e9335d0c08a1326069c2"
-    git clone https://github.com/ARMmbed/mbedtls.git 
+    MBEDTLS_HASH="bb9d720b21230664a122e386092935e775e3a422"
+    git clone https://github.com/PelionIOT/pelion-crypto.git mbedtls
     cd mbedtls
     git checkout "$MBEDTLS_HASH"
     cp -r ../tools/importer/ .
@@ -29,6 +29,7 @@ then
     cd ..
     rm -rf library include programs
     cd ..
+
     echo "Making a backup of application .mbedignore file for cleanup"
     cp ../.mbedignore ../.mbedignore-application-backup-baremetal
     echo "Appending application .mbedignore file with baremetal TLS configurations"

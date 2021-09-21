@@ -119,7 +119,7 @@ static void notifier_event_handler(arm_event_t *event)
 
 void notifier_init(notifier_t *notifier, endpoint_t *endpoint)
 {
-    tr_info("notifier_init");
+    tr_info("init");
 
     notifier->endpoint = endpoint;
 
@@ -143,7 +143,7 @@ bool notifier_setup(notifier_t *notifier)
     if (notifier_event_handler_id < 0) {
         notifier_event_handler_id = eventOS_event_handler_create(&notifier_event_handler, NOTIFIER_EVENT_INIT);
         if (notifier_event_handler_id < 0) {
-            tr_error("notifier_setup() eventOS_event_handler_create failed!");
+            tr_error("setup() eventOS_event_handler_create failed");
             assert(0);
         }
     }
@@ -193,7 +193,6 @@ void notifier_continue(notifier_t *notifier)
 
 static uint32_t notifier_get_notify_option_number(notifier_t *notifier)
 {
-
     notifier->notify_option_number++;
 
     if (notifier->notify_option_number > NOTIFIER_UINT24_MAX) {
@@ -474,7 +473,6 @@ static void notifier_schedule_notification(notifier_t *notifier, uint32_t curren
             assert(0);
         }
     }
-
 }
 
 static uint8_t notifier_set_parameters(notifier_t *notifier, registry_observation_parameters_t *parameters, const registry_path_t *path,
@@ -519,18 +517,15 @@ static uint8_t notifier_set_parameters(notifier_t *notifier, registry_observatio
     }
 
     return 0;
-
 }
 
 static void notifier_callback(endpoint_t *endpoint, const registry_path_t *path, registry_notification_status_t status)
 {
-
     registry_callback_t callback;
 
     if (registry_get_callback(&endpoint->registry, path, &callback) == REGISTRY_STATUS_OK) {
         callback(REGISTRY_CALLBACK_NOTIFICATION_STATUS, path, NULL, NULL, status, &endpoint->registry);
     }
-
 }
 
 static bool notifier_send_observation_notification_with_path(endpoint_t *endpoint, const registry_path_t *path, uint8_t *token_ptr, uint8_t token_len,
@@ -540,9 +535,10 @@ static bool notifier_send_observation_notification_with_path(endpoint_t *endpoin
     uint32_t max_age;
 
     /* Check parameters */
-    if (endpoint == NULL || endpoint->coap == NULL || endpoint->connection == NULL) {
-        tr_error("notifier_send_observation_notification invalid parameters.");
-        notifier_callback(&endpoint->notifier, path, NOTIFICATION_STATUS_BUILD_ERROR);
+    assert(endpoint);
+    if (endpoint->coap == NULL || endpoint->connection == NULL) {
+        tr_error("send_observation_notification invalid parameters");
+        notifier_callback(endpoint, path, NOTIFICATION_STATUS_BUILD_ERROR);
         return false;
     }
 
@@ -550,7 +546,7 @@ static bool notifier_send_observation_notification_with_path(endpoint_t *endpoin
     if (registry_get_max_age(&endpoint->registry, path, &max_age) == REGISTRY_STATUS_OK) {
         status = notifier_send_observation_notification(endpoint, max_age, token_ptr, token_len, payload_ptr, payload_len, content_format);
     } else {
-        tr_error("notifier_send_observation_notification() could not read max_age from registry!");
+        tr_error("send_observation_notification() could not read max_age from registry");
         status = NOTIFICATION_STATUS_BUILD_ERROR;
     }
 
@@ -571,12 +567,12 @@ int notifier_send_observation_notification(struct endpoint_s *endpoint, uint32_t
     /* Allocate and initialize memory for header struct */
     notification_message_ptr = sn_coap_parser_alloc_message(endpoint->coap);
     if (notification_message_ptr == NULL) {
-        tr_error("notifier_send_observation_notification alloc_message failed.");
+        tr_error("send_observation_notification alloc_message failed");
         goto exit_error;
     }
 
     if (sn_coap_parser_alloc_options(endpoint->coap, notification_message_ptr) == NULL) {
-        tr_error("notifier_send_observation_notification alloc_options failed.");
+        tr_error("send_observation_notification alloc_options failed");
         goto exit_error;
     }
 
@@ -646,7 +642,7 @@ static bool notifier_send_notification(notifier_t *notifier, const registry_path
     registry_tlv_serialize_status_t serializer_status;
     const lwm2m_resource_meta_definition_t* meta_data = NULL;
 
-    tr_info("notifier_send_notification()");
+    tr_info("send_notification()");
 
     if(path->path_type == REGISTRY_PATH_RESOURCE) {
 
@@ -714,12 +710,10 @@ static bool notifier_send_notification(notifier_t *notifier, const registry_path
     }
 
     return success;
-
 }
 
 static void notifier_clear_dirty_children(notifier_t *notifier, const registry_path_t *path)
 {
-
     registry_listing_t listing;
     registry_observation_parameters_t parameters;
     int previous_level = path->path_type;
@@ -751,18 +745,16 @@ static void notifier_clear_dirty_children(notifier_t *notifier, const registry_p
 
             parameters.dirty = false;
             parameters.sent = false;
-            print_registry_path("notifier_clear_dirty_children() clear:", &listing.path);
+            print_registry_path("clear_dirty_children() clear:", &listing.path);
             registry_set_observation_parameters(&notifier->endpoint->registry, &listing.path, &parameters);
 
         }
 
     }
-
 }
 
 static void notifier_clear_dirty(notifier_t *notifier, const registry_path_t *path)
 {
-
     registry_observation_parameters_t parameters;
     registry_path_t current_path = *path;
 
@@ -783,7 +775,7 @@ static void notifier_clear_dirty(notifier_t *notifier, const registry_path_t *pa
 
                 parameters.dirty = false;
                 parameters.sent = false;
-                print_registry_path("notifier_clear_dirty() clear:", &current_path);
+                print_registry_path("clear_dirty() clear:", &current_path);
                 registry_set_observation_parameters(&notifier->endpoint->registry, &current_path, &parameters);
 
             }
@@ -794,12 +786,10 @@ static void notifier_clear_dirty(notifier_t *notifier, const registry_path_t *pa
 
 
     notifier_clear_dirty_children(notifier, path);
-
 }
 
 void notifier_notification_sent(notifier_t *notifier, bool success, const registry_path_t *path)
 {
-
     registry_observation_parameters_t parameters;
 
     notifier->notifying = false;
@@ -824,7 +814,6 @@ void notifier_notification_sent(notifier_t *notifier, bool success, const regist
 
     send_queue_sent(notifier->endpoint, true);
     send_queue_request(notifier->endpoint, SEND_QUEUE_NOTIFIER);
-
 }
 
 static void notifier_notify(notifier_t *notifier, const registry_path_t *path, registry_observation_parameters_t *parameters, notifier_observation_value_t *value, bool *notified)
@@ -855,7 +844,7 @@ static void notifier_notify(notifier_t *notifier, const registry_path_t *path, r
 
     if (!time_to_pmax) {
         if (!*notified) {
-            tr_debug("notifier_notify() !time_to_pmax");
+            tr_debug("notify() !time_to_pmax");
             *notified = notifier_send_notification(notifier, path, parameters, current_time, observation_value, false);
         } else {
             notifier_schedule_notification(notifier, current_time, time_to_pmax);
@@ -874,7 +863,7 @@ static void notifier_notify(notifier_t *notifier, const registry_path_t *path, r
         time_to_pmin = notifier_time_to_pmin(notifier, parameters, current_time);
 
         if (!time_to_pmin && !*notified) {
-            tr_debug("notifier_notify() !time_to_pmin");
+            tr_debug("notify() !time_to_pmin");
             *notified = notifier_send_notification(notifier, path, parameters, current_time, observation_value, true);
         } else {
             notifier_schedule_notification(notifier, current_time, time_to_pmin);
@@ -885,8 +874,6 @@ static void notifier_notify(notifier_t *notifier, const registry_path_t *path, r
     }
 
     notifier_schedule_notification(notifier, current_time, time_to_pmax);
-
-
 }
 
 static uint8_t notifier_get_observation_parameters(notifier_t *notifier, registry_path_t *path, registry_observation_parameters_t *parameters)
@@ -925,7 +912,6 @@ static uint8_t notifier_get_observation_parameters(notifier_t *notifier, registr
 
 static void notifier_init_parameters(notifier_t *notifier, const registry_path_t *path)
 {
-
     registry_listing_t listing;
     registry_observation_parameters_t parameters;
 
@@ -941,11 +927,8 @@ static void notifier_init_parameters(notifier_t *notifier, const registry_path_t
 
             parameters = (registry_observation_parameters_t){0};
             registry_set_observation_parameters(&notifier->endpoint->registry, &listing.path, &parameters);
-
         }
-
     }
-
 }
 
 int32_t notifier_start_observation(notifier_t *notifier, const registry_path_t *path, const uint8_t *token, const uint8_t token_len, const sn_coap_content_format_e content_type)
@@ -987,7 +970,6 @@ int32_t notifier_start_observation(notifier_t *notifier, const registry_path_t *
     notifier_schedule_notification(notifier, current_time, pmax);
 
     return notifier_get_notify_option_number(notifier);
-
 }
 
 void notifier_stop_observation(notifier_t *notifier, const registry_path_t *path)
@@ -1018,7 +1000,7 @@ void notifier_stop_observation(notifier_t *notifier, const registry_path_t *path
     if (!registry_is_auto_observable(&notifier->endpoint->registry, &notifier->last_notified)) {
 #endif
 
-        print_registry_path("notifier_stop_observation() ", path);
+        print_registry_path("stop_observation() ", path);
 
         parameters.observed = 0;
         parameters.token_size = 0;
@@ -1031,7 +1013,7 @@ void notifier_stop_observation(notifier_t *notifier, const registry_path_t *path
 
 #if MBED_CLIENT_ENABLE_AUTO_OBSERVATION
     } else {
-        tr_warn("notifier_stop_observation() Auto-observation may not be stopped.");
+        tr_warn("stop_observation() Auto-observation may not be stopped");
     }
 #endif
 
@@ -1041,7 +1023,6 @@ void notifier_stop_observation(notifier_t *notifier, const registry_path_t *path
         send_queue_request(notifier->endpoint, SEND_QUEUE_NOTIFIER);
         send_queue_sent(notifier->endpoint, true);
     }
-
 }
 
 static void notifier_notify_resource(notifier_t *notifier, const registry_path_t *path, registry_object_value_t *resource_value, bool *notified)
@@ -1093,8 +1074,6 @@ static void notifier_notify_resource(notifier_t *notifier, const registry_path_t
         notifier_notify(notifier, &current_path, &resource_parameters, value_read, notified);
 
     } while (current_path.path_type++ != path->path_type);
-
-
 }
 
 void notifier_set_dirty(registry_t *registry, const registry_path_t *path)
@@ -1147,7 +1126,6 @@ void notifier_set_dirty(registry_t *registry, const registry_path_t *path)
         registry_set_observation_parameters(registry, &current_path, &parameters);
 
     } while (current_path.path_type++ != path->path_type);
-
 }
 
 static void notifier_check_all_resources(notifier_t *notifier, bool *notified)
@@ -1189,9 +1167,7 @@ static void notifier_check_all_resources(notifier_t *notifier, bool *notified)
             notifier_notify_resource(notifier, &listing.path, &value, notified);
 
         }
-
     }
-
 }
 
 static void notifier_value_changed(notifier_t *notifier)
@@ -1199,7 +1175,6 @@ static void notifier_value_changed(notifier_t *notifier)
     bool notified = NOTIFTER_USE_INITIAL_DELAY;
 
     notifier_check_all_resources(notifier, &notified);
-
 }
 
 static void notifier_timer_expired(notifier_t *notifier)
@@ -1249,7 +1224,6 @@ static void notifier_notify_next(notifier_t *notifier, const registry_path_t *pa
         skip = false;
 
     } while (!*notified && round++ == 1);
-
 }
 
 void notifier_send_now(notifier_t *notifier)
@@ -1264,7 +1238,6 @@ void notifier_send_now(notifier_t *notifier)
     if (!notified) {
         send_queue_sent(notifier->endpoint, true);
     }
-
 }
 
 void notifier_parameters_changed(notifier_t *notifier, const registry_path_t *path)
@@ -1296,9 +1269,7 @@ void notifier_clear_notifications(notifier_t *notifier)
             parameters.observed = false;
             parameters.token_size = 0;
             registry_set_observation_parameters(&notifier->endpoint->registry, &listing.path, &parameters);
-
         }
-
     }
 }
 

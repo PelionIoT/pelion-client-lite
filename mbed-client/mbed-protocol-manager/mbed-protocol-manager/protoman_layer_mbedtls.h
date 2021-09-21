@@ -81,10 +81,27 @@ int wrapper_write(void *ctx, const uint8_t *buf, size_t len);
 int wrapper_read(void *ctx, uint8_t *buf, size_t len);
 int wrapper_recv_timeout(void *ctx, unsigned char *buf, size_t len, uint32_t timeout);
 
-extern void protoman_add_layer_mbedtls(struct protoman_s *protoman, struct protoman_layer_s *layer);
+extern void protoman_add_layer_mbedtls(
+    struct protoman_s *protoman,
+    struct protoman_layer_s *layer
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    , bool ignore_session_resume
+#endif
+    );
+
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+extern void protoman_set_cid_value(struct protoman_layer_s *layer, const uint8_t *data_ptr, const size_t data_len);
+#endif
+extern bool protoman_is_connection_id_available();
+extern void store_ssl_session_context_to_storage(struct protoman_layer_s *layer);
+extern void remove_ssl_session(struct protoman_layer_s *layer);
+
 
 struct protoman_layer_mbedtls_common_s {
     struct protoman_layer_s layer;
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    bool ignore_session_resume;
+#endif
     uint8_t handshakes_failed;
     uint8_t handshakes_max;
     uint32_t handshakes_delay_ms;

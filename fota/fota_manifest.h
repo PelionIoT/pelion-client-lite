@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2020 ARM Ltd.
+// Copyright 2019-2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -21,7 +21,7 @@
 
 #include "fota/fota_base.h"
 
-#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+#if defined(MBED_CLOUD_CLIENT_FOTA_ENABLE)
 
 #include "fota/fota_crypto_defs.h"
 #include "fota/fota_component.h"
@@ -36,8 +36,15 @@ extern "C" {
 #define FOTA_MANIFEST_TRACE_DEBUG(fmt, ...)
 #endif
 
-#define FOTA_MANIFEST_PAYLOAD_FORMAT_RAW    1
-#define FOTA_MANIFEST_PAYLOAD_FORMAT_DELTA  5
+// Payload format types
+#define FOTA_MANIFEST_PAYLOAD_FORMAT_RAW             0x0001
+#define FOTA_MANIFEST_PAYLOAD_FORMAT_DELTA           0x0005
+//  V3 only
+#define FOTA_MANIFEST_PAYLOAD_FORMAT_ENCRYPTED_RAW   0x0101
+#define FOTA_MANIFEST_PAYLOAD_FORMAT_ENCRYPTED_DELTA 0x0105 // not supported yet
+
+// Encryption key tags
+#define FOTA_MANIFEST_ENCRYPTION_KEY_TAG_AES_128     0x1
 
 /*
  * Update details as extracted from the Pelion FOTA manifest
@@ -57,6 +64,9 @@ typedef struct {
 #if defined(MBED_CLOUD_CLIENT_FOTA_SIGNED_IMAGE_SUPPORT)
     uint8_t        installed_signature[FOTA_IMAGE_RAW_SIGNATURE_SIZE]; /** Raw encoded signature over installed image */
 #endif  // defined(MBED_CLOUD_CLIENT_FOTA_SIGNED_IMAGE_SUPPORT)
+#if (MBED_CLOUD_CLIENT_FOTA_ENCRYPTION_SUPPORT == 1)
+    uint8_t        encryption_key[FOTA_ENCRYPT_KEY_SIZE];  /*< Encryption key used to encrypt payload */
+#endif
 
 } manifest_firmware_info_t;
 
@@ -80,6 +90,6 @@ int fota_manifest_parse(
 }
 #endif
 
-#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
+#endif // defined(MBED_CLOUD_CLIENT_FOTA_ENABLE)
 
 #endif // __FOTA_MANIFEST_H_

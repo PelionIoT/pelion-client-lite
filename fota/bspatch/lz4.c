@@ -177,6 +177,7 @@
   typedef  uint8_t BYTE;
   typedef uint16_t U16;
   typedef uint32_t U32;
+  typedef   int8_t S8;
   typedef  int32_t S32;
   typedef uint64_t U64;
   typedef uintptr_t uptrval;
@@ -184,6 +185,7 @@
   typedef unsigned char       BYTE;
   typedef unsigned short      U16;
   typedef unsigned int        U32;
+  typedef   signed char       S8;
   typedef   signed int        S32;
   typedef unsigned long long  U64;
   typedef size_t              uptrval;   /* generally true, except OpenVMS-64 */
@@ -198,11 +200,21 @@
 /*-************************************
 *  Reading and writing into memory
 **************************************/
+#ifdef __CC_ARM
+#ifdef __BIG_ENDIAN
+#define LZ4_isLittleEndian() 0U
+#else
+#define LZ4_isLittleEndian() 1U
+#endif
+#elif defined __BYTE_ORDER__ && defined __ORDER_LITTLE_ENDIAN__
+#define LZ4_isLittleEndian() ((unsigned) (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__))
+#else
 static unsigned LZ4_isLittleEndian(void)
 {
     const union { U32 u; BYTE c[4]; } one = { 1 };   /* don't use static : performance detrimental */
     return one.c[0];
 }
+#endif
 
 
 #if defined(LZ4_FORCE_MEMORY_ACCESS) && (LZ4_FORCE_MEMORY_ACCESS==2)
@@ -1425,8 +1437,8 @@ LZ4_decompress_generic(
         BYTE* cpy;
 
         const BYTE* const dictEnd = (dictStart == NULL) ? NULL : dictStart + dictSize;
-        const unsigned inc32table[8] = {0, 1, 2,  1,  0,  4, 4, 4};
-        const int      dec64table[8] = {0, 0, 0, -1, -4,  1, 2, 3};
+        static const BYTE inc32table[8] = {0, 1, 2,  1,  0,  4, 4, 4};
+        static const S8   dec64table[8] = {0, 0, 0, -1, -4,  1, 2, 3};
 
         const int safeDecode = (endOnInput==endOnInputSize);
         const int checkOffset = ((safeDecode) && (dictSize < (int)(64 KB)));

@@ -44,10 +44,6 @@
 #include "AT_CellularStack.h"
 #endif // PROTOMAN_OFFLOAD_TLS
 
-#ifdef MBED_HEAP_STATS_ENABLED
-#include "memory_tests.h"
-#endif
-
 // This macro will enable the socket callback bouncing out of possible
 // interrupt context.
 // Note: the value of this macro could/should be hardware/application specific,
@@ -337,14 +333,15 @@ static void _async_dns_callback(void *data, nsapi_error_t result, SocketAddress 
     struct protoman_s *protoman = (struct protoman_s *)layer->protoman;
     struct protoman_layer_mbedos_socket_s *layer_mbedos_socket = (struct protoman_layer_mbedos_socket_s *)layer;
 
-    if (NSAPI_ERROR_OK == result) {
+    if (NSAPI_ERROR_OK <= result) {
+        // at least one address resolved
         layer_mbedos_socket->address = *address;
+        layer_mbedos_socket->async_dns_query = NSAPI_ERROR_OK;
+    } else {
+        layer_mbedos_socket->async_dns_query = result;
     }
 
-    layer_mbedos_socket->async_dns_query = result;
-
     protoman_event(protoman, layer, PROTOMAN_EVENT_RUN, PROTOMAN_EVENT_PRIORITY_LOW, 0);
-
 }
 
 static int _do_connect(struct protoman_layer_s *layer)

@@ -108,6 +108,9 @@ static bool _layers_in_state(struct protoman_s *protoman, int state)
 
 static bool _layer_exists(struct protoman_s *protoman, struct protoman_layer_s *layer_in)
 {
+    if(layer_in == NULL || layer_in->name == NULL) {
+        return false;
+    }
     ns_list_foreach(struct protoman_layer_s, layer, &protoman->layers) {
         if (layer == layer_in) {
             protoman_verbose("%s layer", layer->name);

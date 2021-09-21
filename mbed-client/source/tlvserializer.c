@@ -1018,14 +1018,14 @@ static registry_tlv_serialize_status_t registry_tlv_deserialize_length(registry_
         if (stlv->offset >= stlv->tlv_size) {
             return REGISTRY_TLV_SERIALIZE_STATUS_INVALID_INPUT;
         }
-        stlv->length = (stlv->length << 8) + stlv->tlv[stlv->offset++];
+        stlv->length = (stlv->length << 8) | stlv->tlv[stlv->offset++];
     }
 
     if (lengthType > LENGTH16) {
         if (stlv->offset >= stlv->tlv_size) {
             return REGISTRY_TLV_SERIALIZE_STATUS_INVALID_INPUT;
         }
-        stlv->length = (stlv->length << 8) + stlv->tlv[stlv->offset++];
+        stlv->length = (stlv->length << 8) | stlv->tlv[stlv->offset++];
     }
 
     return REGISTRY_TLV_SERIALIZE_STATUS_OK;

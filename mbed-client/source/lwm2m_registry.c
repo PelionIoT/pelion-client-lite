@@ -978,14 +978,13 @@ registry_status_t registry_is_value_empty(const registry_t *registry, const regi
 
 static registry_status_t registry_set_object_data(registry_t *registry, const registry_path_t *path, registry_object_value_t value, registry_data_type_t data_type)
 {
-
-    print_registry_path("registry_set_object_data() path: ", path);
-
     registry_object_t *object;
 
     if (!registry || !path) {
         return REGISTRY_STATUS_INVALID_INPUT;
     }
+
+    print_registry_path("registry_set_object_data() path: ", path);
 
     if (path->path_type < REGISTRY_PATH_RESOURCE) {
         return REGISTRY_STATUS_NO_DATA;

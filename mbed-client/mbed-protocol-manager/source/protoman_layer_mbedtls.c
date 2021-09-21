@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <stddef.h> /* offsetof() */
 #include <string.h>
+#include <assert.h>
 
 #include "nanostack-event-loop/eventOS_event.h"
 #include "mbedtls/net.h"
@@ -32,6 +33,10 @@
 #include "mbedtls/ssl.h"
 
 #include "mbed-protocol-manager/protoman_layer_mbedtls.h"
+
+#if defined(MBEDTLS_SSL_CONF_RNG)
+#include "shared_rng.h"
+#endif
 
 #define TRACE_GROUP  "mTLS"
 #include "include/protoman_internal.h"
@@ -77,11 +82,29 @@ static const char _mbedtls_error[] = "mbedTLS passes read and write errors throu
 //unsigned char id[32];       /*!< session identifier */
 //unsigned char master[48];   /*!< the master secret  */
 
+#ifndef MBEDTLS_SSL_DTLS_CONNECTION_ID
+#error "MBEDTLS_SSL_DTLS_CONNECTION_ID must be defined with PROTOMAN_USE_SSL_SESSION_RESUME"
+#endif
+
+#ifndef MBEDTLS_SSL_CONTEXT_SERIALIZATION
+#error "MBEDTLS_SSL_CONTEXT_SERIALIZATION must be defined with PROTOMAN_USE_SSL_SESSION_RESUME"
+#endif
+
 // Size of the session data
 static const int ssl_session_size = 92;
+#define SSL_SESSION_CONTEXT_SIZE  1024
 
-static void store_ssl_session(struct protoman_layer_s *layer);
-static void load_ssl_session(struct protoman_layer_s *layer);
+size_t session_context_length = 0;
+uint8_t session_context[SSL_SESSION_CONTEXT_SIZE] = {0};
+
+static bool store_ssl_session(struct protoman_layer_s *layer);
+static bool load_ssl_session(struct protoman_layer_s *layer);
+static void load_ssl_session_from_storage(struct protoman_layer_s *layer);
+static void store_ssl_session_to_storage(struct protoman_layer_s *layer);
+static bool store_ssl_session_context(struct protoman_layer_s *layer);
+static bool load_ssl_session_context(struct protoman_layer_s *layer);
+static void load_ssl_session_context_from_storage(struct protoman_layer_s *layer);
+
 #endif //PROTOMAN_USE_SSL_SESSION_RESUME
 
 static const struct protoman_layer_callbacks_s callbacks = {
@@ -99,7 +122,13 @@ static const struct protoman_layer_callbacks_s callbacks = {
     _do_resume  // &_do_resume
 };
 
-void protoman_add_layer_mbedtls(struct protoman_s *protoman, struct protoman_layer_s *layer)
+void protoman_add_layer_mbedtls(
+    struct protoman_s *protoman,
+    struct protoman_layer_s *layer
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    , bool ignore_session_resume
+#endif
+    )
 {
     struct protoman_layer_mbedtls_common_s *layer_mbedtls_common = (struct protoman_layer_mbedtls_common_s *)layer;
 
@@ -122,6 +151,9 @@ void protoman_add_layer_mbedtls(struct protoman_s *protoman, struct protoman_lay
     layer_mbedtls_common->handshakes_failed = 0;
     layer_mbedtls_common->handshakes_max = 10;
     layer_mbedtls_common->handshakes_delay_ms = 5000;
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    layer_mbedtls_common->ignore_session_resume = ignore_session_resume;
+#endif
 
     protoman_add_layer(protoman, layer);
 }
@@ -366,6 +398,11 @@ static int _do_configuration(struct protoman_layer_s *layer)
     protoman_debug("Setting ssl mtu: %d", PROTOMAN_MTU);
 #endif // MBEDTLS_SSL_PROTO_DTLS
 
+#if defined(PROTOMAN_MBEDTLS_DISABLE_DATAGRAM_PACKING)
+    mbedtls_ssl_set_datagram_packing(&layer_mbedtls_common->ssl, 0);
+    protoman_debug("Disabling datagram packing");
+#endif
+
 #if defined(MBEDTLS_SSL_MAX_FRAGMENT_LENGTH)
     protoman_debug("Setting ssl max_content_len: %d, max_frag_len: %d", MBEDTLS_SSL_MAX_CONTENT_LEN, PROTOMAN_LAYER_MBEDTLS_MAX_FRAG_LEN);
 
@@ -385,7 +422,7 @@ static int _do_configuration(struct protoman_layer_s *layer)
         return PROTOMAN_STATE_RETVAL_ERROR;
     }
 
-#if defined(MBEDTLS_SSL_DTLS_CONNECTION_ID) && defined(MBEDTLS_SSL_CID_ENABLED)
+#if defined(MBEDTLS_SSL_DTLS_CONNECTION_ID) && (MBEDTLS_SSL_CID_ENABLED)
     if (protoman->config.is_dgram) {
         protoman_debug("Setting cid enabled");
         retval = mbedtls_ssl_set_cid(&layer_mbedtls_common->ssl, MBEDTLS_SSL_CID_ENABLED, NULL, 0);
@@ -394,15 +431,6 @@ static int _do_configuration(struct protoman_layer_s *layer)
             protoman_layer_record_error(layer, PROTOMAN_ERR_INVALID_INPUT, retval, protoman_strmbedtls(retval));
             return PROTOMAN_STATE_RETVAL_ERROR;
         }
-    }
-#endif
-
-#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
-    struct protoman_config_tls_certificate_s *config_cert = (struct protoman_config_tls_certificate_s *)layer->config;
-    if (!config_cert->bootstrap) {
-        load_ssl_session(layer);
-    } else {
-        protoman_info("Do not try to load ssl session in bootstrap mode");
     }
 #endif
 
@@ -674,9 +702,10 @@ static int _do_certificates(struct protoman_layer_s *layer)
 static int _do_connect(struct protoman_layer_s *layer)
 {
     struct protoman_layer_mbedtls_common_s *layer_mbedtls_common = (struct protoman_layer_mbedtls_common_s *)layer;
-    int retval;
-
-    retval = mbedtls_ssl_handshake_step(&layer_mbedtls_common->ssl);
+    int retval = 0;
+    if (layer_mbedtls_common->ssl.state != MBEDTLS_SSL_HANDSHAKE_OVER) {
+        retval = mbedtls_ssl_handshake_step(&layer_mbedtls_common->ssl);
+    }    
     protoman_verbose("mbedtls_ssl_handshake_step()");
 
     switch (retval) {
@@ -696,10 +725,14 @@ static int _do_connect(struct protoman_layer_s *layer)
 
 #ifdef PROTOMAN_USE_SSL_SESSION_RESUME
                 struct protoman_config_tls_certificate_s *config_cert = (struct protoman_config_tls_certificate_s *)layer->config;
-                if (!config_cert->bootstrap) {
-                    store_ssl_session(layer);
+                if (!layer_mbedtls_common->ignore_session_resume) {
+                    if (!config_cert->bootstrap) {
+                        store_ssl_session_to_storage(layer);
+                    } else {
+                        protoman_debug("Do not store ssl session in bootstrap mode");
+                    }
                 } else {
-                    protoman_info("Do not store ssl session in bootstrap mode");
+                    protoman_debug("Do not load store ssl session. CID might be incorrect");
                 }
 #endif
 
@@ -715,7 +748,12 @@ static int _do_connect(struct protoman_layer_s *layer)
             /* No PROTOMAN_EVENT_RUN event scheduled here because there
              * will be PROTOMAN_DATA_AVAIL or PROTOMAN_DATA_WRITTEN event from below */
             return PROTOMAN_STATE_RETVAL_WAIT;
-
+        case MBEDTLS_ERR_X509_CERT_VERIFY_FAILED:
+        case MBEDTLS_ERR_SSL_UNEXPECTED_CID:
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+            remove_ssl_session(layer);
+#endif
+        break;
         case MBEDTLS_ERR_SSL_BAD_INPUT_DATA:
         default:
             protoman_err("mbedtls_ssl_handshake_step() returned %s (%d)", protoman_strmbedtls(retval), retval);
@@ -742,7 +780,7 @@ static int _do_write(struct protoman_layer_s *layer)
 
     retval = mbedtls_ssl_write(&layer_mbedtls_common->ssl, layer->tx_buf + layer->tx_offset, layer->tx_len - layer->tx_offset);
     if (retval < 0 && retval != MBEDTLS_ERR_SSL_WANT_READ && retval != MBEDTLS_ERR_SSL_WANT_WRITE) {
-        protoman_warn("mbedtls_ssl_write() returned %s (%X)", protoman_strmbedtls(retval), retval);
+        protoman_warn("mbedtls_ssl_write() returned %s (%d)", protoman_strmbedtls(retval), retval);
     }
 
     /* Capture master secret for TLS decryption in Wireshark */
@@ -782,6 +820,13 @@ static int _do_write(struct protoman_layer_s *layer)
                 layer->tx_buf = NULL;
             }
     }
+
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    // check if is dtls mode
+    if (!layer_mbedtls_common->ignore_session_resume && protoman->config.is_dgram) {
+        store_ssl_session_to_storage(layer);
+    }
+#endif
 
 exit:
     return state_retval;
@@ -836,7 +881,7 @@ static int _do_read(struct protoman_layer_s *layer)
                 protoman_layer_record_error(layer, PROTOMAN_ERR_CONNECTION_CLOSED, retval, "EOF");
                 state_retval = PROTOMAN_STATE_RETVAL_ERROR;
             }
-            protoman_info("mbedtls_ssl_read() returned %s (%X)", protoman_strmbedtls(retval), retval);
+            protoman_info("mbedtls_ssl_read() returned %s (%d)", protoman_strmbedtls(retval), retval);
             goto cleanup;
 
         default:
@@ -854,12 +899,20 @@ static int _do_read(struct protoman_layer_s *layer)
             goto exit;
     }
 print_as_error:
-    protoman_err("mbedtls_ssl_read() returned %s (%X)", protoman_strmbedtls(retval), retval);
+    protoman_err("mbedtls_ssl_read() returned %s (%d)", protoman_strmbedtls(retval), retval);
 cleanup:
     PROTOMAN_DEBUG_PRINT_FREE(layer->name, layer->rx_buf);
     protoman_rx_free(protoman, layer->rx_buf);
     layer->rx_buf = NULL;
 exit:
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    // If received data, connection is ok
+    if (layer_mbedtls_common->ignore_session_resume) {
+        // Ping success
+        protoman_info("Ping success");
+        layer_mbedtls_common->ignore_session_resume = false;
+    }    
+#endif
     return state_retval;
 }
 
@@ -887,9 +940,23 @@ static int _do_disconnect(struct protoman_layer_s *layer)
                 return PROTOMAN_STATE_RETVAL_WAIT; /* stay in disconnectin state and try again */
 
             default:
-                protoman_warn("mbedtls_ssl_close_notify() failed with %X", retval);
+                protoman_warn("mbedtls_ssl_close_notify() failed with %d", retval);
         }
     }
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME    
+    /* store ssl session to storage */ 
+    struct protoman_config_tls_certificate_s *config_cert = (struct protoman_config_tls_certificate_s *)layer->config;
+    if (!config_cert->bootstrap && !layer_mbedtls_common->ignore_session_resume) {
+         // check if is dtls mode
+        if (!protoman->config.is_dgram) {
+            store_ssl_session(layer);
+        } else {
+            if (store_ssl_session_context(layer)) {
+                store_ssl_session_context_to_storage(layer);
+            }        
+        }
+    }
+#endif
 
     /* Reset mbed TLS session
      * https://tls.mbed.org/api/ssl_8h.html#a21432367cbce428f10dcb62d9456fa7e */
@@ -901,7 +968,7 @@ static int _do_disconnect(struct protoman_layer_s *layer)
 
         case MBEDTLS_ERR_SSL_ALLOC_FAILED:
         default:
-            protoman_err("mbedtls_ssl_session_reset(), failed with %s (%X)", protoman_strmbedtls(retval), retval);
+            protoman_err("mbedtls_ssl_session_reset(), failed with %s (%d)", protoman_strmbedtls(retval), retval);
             protoman_layer_record_error(layer, PROTOMAN_ERR_NOMEM, retval, protoman_strmbedtls(retval));
             return PROTOMAN_STATE_RETVAL_ERROR;
     }
@@ -918,7 +985,6 @@ static int _do_init(struct protoman_layer_s *layer)
 {
     struct protoman_config_tls_common_s *config_common = (struct protoman_config_tls_common_s *)layer->config;
     int retval;
-
     protoman_verbose("");
 
     /* Do configuration */
@@ -927,7 +993,19 @@ static int _do_init(struct protoman_layer_s *layer)
         protoman_err("_do_configuration() failed with %s", protoman_strstateretval(retval));
         return PROTOMAN_STATE_RETVAL_ERROR;
     }
-
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    struct protoman_layer_mbedtls_common_s *layer_mbedtls_common = (struct protoman_layer_mbedtls_common_s *)layer;
+    struct protoman_config_tls_certificate_s *config_cert = (struct protoman_config_tls_certificate_s *)layer->config;
+    if (!layer_mbedtls_common->ignore_session_resume) {
+        if (!config_cert->bootstrap) {
+            load_ssl_session_from_storage(layer);
+        } else {
+            protoman_debug("Do not try to load ssl session in bootstrap mode");
+        }
+    } else {
+        protoman_debug("Do not to load ssl session. Ignoring session resume");
+    }
+#endif
     /* Do security configuration */
     if (PROTOMAN_SECURITY_MODE_CERTIFICATE == config_common->security_mode) {
 #ifdef PROTOMAN_SECURITY_ENABLE_CERTIFICATE
@@ -1002,31 +1080,27 @@ static void layer_free(struct protoman_layer_s *layer)
     mbedtls_ssl_config_free(&layer_mbedtls_common->conf);
     mbedtls_ssl_free(&layer_mbedtls_common->ssl);
 }
-#endif
 
 #ifdef PROTOMAN_USE_SSL_SESSION_RESUME
-static void store_ssl_session(struct protoman_layer_s *layer)
+static bool store_ssl_session(struct protoman_layer_s *layer)
 {
     protoman_debug("");
     struct protoman_layer_mbedtls_common_s *layer_mbedtls_common = (struct protoman_layer_mbedtls_common_s *)layer;
     mbedtls_ssl_session ssl_session = {0};
     int session_status = mbedtls_ssl_get_session(&layer_mbedtls_common->ssl, &ssl_session);
-
+    bool success = false;
     if (session_status != 0) {
         protoman_debug("mbedtls_ssl_get_session failed: %d", session_status);
-        return;
+        return success;
     }
 
     uint8_t session_buffer[ssl_session_size];
 
     PROTOMAN_MEMCPY(session_buffer, (uint8_t*)&ssl_session.id_len, sizeof(ssl_session.id_len));
-    PROTOMAN_MEMCPY(session_buffer + sizeof(ssl_session.id_len),
-           (uint8_t*)&ssl_session.id, sizeof(ssl_session.id));
-    PROTOMAN_MEMCPY(session_buffer + sizeof(ssl_session.id_len) + sizeof(ssl_session.id),
-           (uint8_t*)&ssl_session.master, sizeof(ssl_session.master));
+    PROTOMAN_MEMCPY(session_buffer + sizeof(ssl_session.id_len), (uint8_t*)&ssl_session.id, sizeof(ssl_session.id));
+    PROTOMAN_MEMCPY(session_buffer + sizeof(ssl_session.id_len) + sizeof(ssl_session.id), (uint8_t*)&ssl_session.master, sizeof(ssl_session.master));
 #if !defined(MBEDTLS_SSL_CONF_SINGLE_CIPHERSUITE)
-    PROTOMAN_MEMCPY(session_buffer + sizeof(ssl_session.id_len) + sizeof(ssl_session.id) + sizeof(ssl_session.master),
-           (uint8_t*)&ssl_session.ciphersuite, sizeof(ssl_session.ciphersuite));
+    PROTOMAN_MEMCPY(session_buffer + sizeof(ssl_session.id_len) + sizeof(ssl_session.id) + sizeof(ssl_session.master), (uint8_t*)&ssl_session.ciphersuite, sizeof(ssl_session.ciphersuite));
 #endif
 
     bool replace = false;
@@ -1047,6 +1121,7 @@ static void store_ssl_session(struct protoman_layer_s *layer)
         // Session data not changed, use existing one
         if (status == CCS_STATUS_SUCCESS && memcmp(session_buffer, existing_session, ssl_session_size) == 0) {
             replace = false;
+            success = true;
         }
     }
 
@@ -1057,25 +1132,70 @@ static void store_ssl_session(struct protoman_layer_s *layer)
         status = set_config_parameter(SSL_SESSION_DATA, session_buffer, ssl_session_size);
         if (status != CCS_STATUS_SUCCESS) {
             protoman_err("failed to store new session: %d", status);
+        } else {
+            success = true;
         }
     } else {
         protoman_info("keep old session");
     }
 
     mbedtls_ssl_session_free(&ssl_session);
+    return success;
 }
 
-void load_ssl_session(struct protoman_layer_s *layer)
+static void load_ssl_session_from_storage(struct protoman_layer_s *layer)
+{
+    protoman_debug("");
+    struct protoman_config_tls_certificate_s *config_cert = (struct protoman_config_tls_certificate_s *)layer->config;
+    if (config_cert->bootstrap) {
+        protoman_debug("do not load session in bootstrap mode");
+        return;
+    }
+    // check if is dtls mode
+    if (!layer->protoman->config.is_dgram) {
+        load_ssl_session(layer);
+    } else {
+        if (session_context_length != 0) {
+            load_ssl_session_context(layer);
+        } else {
+            load_ssl_session_context_from_storage(layer);
+            if (session_context_length != 0) {
+                load_ssl_session_context(layer);
+            }
+        }
+    }
+}
+
+static void store_ssl_session_to_storage(struct protoman_layer_s *layer)
+{
+    protoman_debug("");
+    struct protoman_config_tls_certificate_s *config_cert = (struct protoman_config_tls_certificate_s *)layer->config;
+    // do nothing if bootstrap
+    if (config_cert->bootstrap) {
+        return;
+    }
+    // check if is dtls mode
+    if (!layer->protoman->config.is_dgram) {
+        store_ssl_session(layer);
+    } else {
+        if (store_ssl_session_context(layer)) {
+            load_ssl_session_from_storage(layer);
+        }        
+    }
+}
+
+static bool load_ssl_session(struct protoman_layer_s *layer)
 {
     protoman_debug("");
     struct protoman_layer_mbedtls_common_s *layer_mbedtls_common = (struct protoman_layer_mbedtls_common_s *)layer;
     size_t data_size = 0;
+    bool success = false;
 
     uint8_t ssl_session_buffer[ssl_session_size];
     ccs_status_e status = get_config_parameter(SSL_SESSION_DATA, ssl_session_buffer, ssl_session_size, &data_size);
     if (status != CCS_STATUS_SUCCESS) {
         protoman_info("failed to read session data info from storage: %d", status);
-        return;
+        return success;
     }
 
     mbedtls_ssl_session ssl_session = {0};
@@ -1088,9 +1208,93 @@ void load_ssl_session(struct protoman_layer_s *layer)
 
     if (mbedtls_ssl_set_session(&layer_mbedtls_common->ssl, &ssl_session) != 0) {
         protoman_err("mbedtls_ssl_set_session - failed!");
+    } else {
+        success = true;
+    }
+    return success;
+}
+
+static bool store_ssl_session_context(struct protoman_layer_s *layer)
+{
+    protoman_debug("");
+    struct protoman_layer_mbedtls_common_s *layer_mbedtls_common = (struct protoman_layer_mbedtls_common_s *)layer;
+    int32_t ssl_status  = 0;
+    PROTOMAN_MEMSET(session_context, 0, SSL_SESSION_CONTEXT_SIZE);
+    ssl_status = mbedtls_ssl_context_save(&layer_mbedtls_common->ssl, session_context, SSL_SESSION_CONTEXT_SIZE, &session_context_length);
+    if (ssl_status != 0) {
+        protoman_err("mbedtls_ssl_context_save failed! -0x%" PRIx32 ".", ssl_status);
+    }
+    return ssl_status == 0;
+}
+
+void store_ssl_session_context_to_storage(struct protoman_layer_s *layer)
+{
+    protoman_debug("");
+    (void) layer; // quiet compiler
+    ccs_status_e status = set_config_parameter(SSL_SESSION_DATA, session_context, session_context_length);
+    if (status != CCS_STATUS_SUCCESS) {
+        protoman_err("failed to store session context: %d", status);
     }
 }
+
+static bool load_ssl_session_context(struct protoman_layer_s *layer)
+{
+    protoman_debug("");
+    struct protoman_layer_mbedtls_common_s *layer_mbedtls_common = (struct protoman_layer_mbedtls_common_s *)layer;
+    int32_t ssl_status  = 0;
+    ssl_status  = mbedtls_ssl_context_load( &layer_mbedtls_common->ssl, session_context, session_context_length );
+    if (ssl_status != 0) {
+        protoman_err("mbedtls_ssl_context_load failed!-0x%" PRIx32 ".",ssl_status);
+        return false;
+    }
+    return true;
+}
+
+static void load_ssl_session_context_from_storage(struct protoman_layer_s *layer)
+{
+    protoman_debug("");
+    (void) layer; // quiet compiler
+    ccs_status_e status = get_config_parameter(SSL_SESSION_DATA, session_context, SSL_SESSION_CONTEXT_SIZE, &session_context_length);
+    if (status != CCS_STATUS_SUCCESS) {
+        protoman_info("failed to read session context from storage: %d", status);
+    }
+}
+
+void remove_ssl_session(struct protoman_layer_s *layer)
+{
+    protoman_debug("");
+    (void) layer; // quiet compiler
+
+    // check if is dtls mode
+    if (layer->protoman->config.is_dgram) {
+        PROTOMAN_MEMSET(session_context, 0, SSL_SESSION_CONTEXT_SIZE);
+        session_context_length = 0;
+    } else {
+        remove_config_parameter(SSL_SESSION_DATA);
+    }    
+}
+
+void protoman_set_cid_value(struct protoman_layer_s *layer, const uint8_t *data_ptr, const size_t data_len)
+{
+    protoman_debug("");
+    assert(data_len <= MBEDTLS_SSL_CID_OUT_LEN_MAX);
+    struct protoman_layer_mbedtls_common_s *layer_mbedtls_common = (struct protoman_layer_mbedtls_common_s *)layer;
+#if defined(MBEDTLS_SSL_DTLS_CONNECTION_ID) && defined(MBEDTLS_SSL_CID_ENABLED)
+    memcpy(layer_mbedtls_common->ssl.transform_out->out_cid, data_ptr, data_len);
+    layer_mbedtls_common->ssl.transform_out->out_cid_len = data_len;
+    store_ssl_session_context(layer);
+#endif
+}
 #endif //PROTOMAN_USE_SSL_SESSION_RESUME
+
+bool protoman_is_connection_id_available()
+{
+#ifdef PROTOMAN_USE_SSL_SESSION_RESUME
+    return session_context_length > 0;
+#else
+    return false;
+#endif
+}
 
 static void print_cid(struct protoman_layer_s *layer, const char* prefix)
 {
@@ -1115,3 +1319,4 @@ static void print_cid(struct protoman_layer_s *layer, const char* prefix)
 #endif
 #endif
 }
+#endif

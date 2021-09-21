@@ -1,5 +1,40 @@
 ## Changelog for Pelion Device Management Client Lite
 
+### Release 1.4.0-lite (21.09.2021)
+
+* Fixed bug where client assumed that event_id and event_type are both 0 when event handler is initialized. Added definition `PDMC_CONNECT_STARTUP_EVENT_TYPE -1 ` to LWM2M interface. Client uses it initializes connection event handler.
+* Removed the `need_reboot = false` option in the `fota_component_add()` API. When registering a component, the `need_reboot` option must always be `true`.
+* Updated to support Mbed OS 6.8.0. Baremetal mbedtls is now only supported with Mbed OS version >= 6.8.0.
+* The new Connection ID (CID) feature eliminates unnecessary DTLS handshake traffic between the client and the cloud during reconnection. To have the client persist the CID during reboot, the application can call the `pause()` API before shutting down the application. This call stores the CID context in persistent memory for use after reboot. The client then uses the CID to establish a secure connection to the cloud without requiring a DTLS handshake. The `PROTOMAN_USE_SSL_SESSION_RESUME` feature flag, which controls this feature, is enabled by default for Mbed OS, and disabled by default for other platforms.
+  * Added a compile-time check to require the mandatory Mbed TLS flags are defined when the Connection ID feature (`PROTOMAN_USE_SSL_SESSION_RESUME`) is enabled.
+* Fixed FOTA full resume.
+* Changes to implementation of update candidate image encryption:
+  * Added new `FOTA_USE_ENCRYPTED_ONE_TIME_FW_KEY` option to `MBED_CLOUD_CLIENT_FOTA_KEY_ENCRYPTION`.
+  * Replaced `FOTA_USE_DEVICE_KEY` with `FOTA_USE_ENCRYPTED_ONE_TIME_FW_KEY` as the default value for `MBED_CLOUD_CLIENT_FOTA_KEY_ENCRYPTION` due to security vulnerability found in `FOTA_USE_DEVICE_KEY`.
+  * Using `FOTA_USE_ENCRYPTED_ONE_TIME_FW_KEY` is a breaking change and requires a new bootloader that support this feature.
+  * Deprecated the `FOTA_USE_DEVICE_KEY` option, which will be removed in a future version.
+* Added `fota_app_postpone_reboot()`. Calling this API postpones device reboot, which is required to complete the FOTA process, until the device application explicitly initiates reboot.
+* Changed `fota_app_defer()` behavior such that FOTA candidate image download or install resumes only after the device application explicitly calls `fota_app_resume()`.
+* Support calling `fota_app_reject()` after calling `fota_app_defer()`.
+* Fix: Support for resuming installation after an unexpected interruption (for example, power loss) of a component image.
+* Added support for updating device firmware with a cloud-encrypted update image.
+  * Enabled by the `MBED_CLOUD_CLIENT_FOTA_ENCRYPTION_SUPPORT` option.
+  * Limitation: Not supported when `MBED_CLOUD_CLIENT_FOTA_CANDIDATE_BLOCK_SIZE` is not 1024.
+* Fixed coverity issues.
+* Fixed compilation for Client Lite Linux, release mode. KVStore failed to compile in release mode.
+* Fixed a bug that prevented Firmware-Over-the-Air (FOTA) from running successfully after devices were provisioned in the production flow.
+* Fixed update flow when the update candidate version is 0.0.10.
+* Fota block device configuration changes: `FOTA_INTERNAL_FLASH_BD` changed to `FOTA_INTERNAL_FLASH_MBED_OS_BD`, `FOTA_CUSTOM_BD` changed to `FOTA_CUSTOM_MBED_OS_BD`, added default block device configuration : `FOTA_DEFAULT_MBED_OS_BD`.
+* Changed FOTA application interface APIs:
+  * `fota_app_on_install_authorization(uint32 token)` -> `fota_app_on_install_authorization()` (removed token)
+  * `fota_app_on_download_authorization(uint32_t token, ...)` -> `fota_app_on_download_authorization(...)` (removed token)
+  * `fota_app_authorize_update()` -> `fota_app_authorize()` (reverted to the deprecated API)
+  * `fota_app_reject_update()` -> `fota_app_reject()` (reverted to the deprecated API)
+  * `fota_app_defer_update()` -> `fota_app_defer()` (reverted to the deprecated API)
+* On Linux targets, all FOTA related files (candidate, header etc.) were moved to the the configuration directory (PAL/KVstore).
+* Require defining `MBED_CLOUD_CLIENT_FOTA_LINUX_SINGLE_MAIN_FILE` in Linux MCCE, Testapp or any Linux app that has a single file update.
+
+
 ### Release 1.3.0-lite (07.12.2020)
 
 * Fixed the `COAP_MSG_CODE_RESPONSE_BAD_REQUEST` and `COAP_MSG_CODE_RESPONSE_FORBIDDEN` responses. Now client re-bootstraps when the server rejects registration.
@@ -30,4 +65,3 @@
 ### Release 1.0.0-lite (31.01.2020)
 
 * Initial alpha release for public preview. Not suitable for production use.
-

@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2020 ARM Ltd.
+// Copyright 2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -16,24 +16,15 @@
 // limitations under the License.
 // ----------------------------------------------------------------------------
 
-#ifndef __FOTA_PLATFORM_LINUX_H_
-#define __FOTA_PLATFORM_LINUX_H_
+#include "fota_internal_ifs.h"
 
-#include "fota/fota_base.h"
+#ifdef MBED_CLOUD_CLIENT_FOTA_ENABLE
 
-#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+#include "fota/fota_event_handler.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#include "fota_candidate.h"
-
-int fota_linux_candidate_iterate(fota_candidate_iterate_callback_info *info);
-int fota_linux_init();
-
-#ifdef __cplusplus
+void fota_internal_resume()
+{
+    fota_event_handler_defer_with_result_ignore_busy(fota_on_resume, /*fota resume by internal flow */ 1);
 }
+
 #endif
-#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
-#endif // __FOTA_PLATFORM_LINUX_H_

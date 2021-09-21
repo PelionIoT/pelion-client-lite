@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// Copyright 2018-2020 ARM Ltd.
+// Copyright 2019-2021 Pelion Ltd.
 //
 // SPDX-License-Identifier: Apache-2.0
 //
@@ -21,7 +21,7 @@
 
 #include "fota/fota_base.h"
 
-#if MBED_CLOUD_CLIENT_FOTA_ENABLE
+#if defined(MBED_CLOUD_CLIENT_FOTA_ENABLE)
 
 #include "fota_header_info.h"
 
@@ -30,59 +30,41 @@ extern "C" {
 #endif
 
 /**
- * Return a pointer to application start.
- *
- * \return Pointer to application start.
+ * @file fota_curr_fw.h
+ *  \brief FOTA requires access to the currently installed firmware (FW) and the FW metadata header.
+ * Support code for each platform should implement the current FW interfaces described in this file.
  */
-uint8_t *fota_curr_fw_get_app_start_addr(void);
 
 /**
- * Return a pointer to header start.
- *
- * \return Pointer to header start.
- */
-uint8_t *fota_curr_fw_get_app_header_addr(void);
-
-#if defined(FOTA_CUSTOM_CURR_FW_STRUCTURE) && (FOTA_CUSTOM_CURR_FW_STRUCTURE)
-/**
- * Read header of current firmware.
+ * Reads the header of the current firmware.
  *
  * \param[in] header_info Header info structure.
  * \return FOTA_STATUS_SUCCESS on success.
  */
 int fota_curr_fw_read_header(fota_header_info_t *header_info);
-#else
-
-// Default read header implementation
-static inline int fota_curr_fw_read_header(fota_header_info_t *header_info)
-{
-    uint8_t *header_in_curr_fw = (uint8_t *)fota_curr_fw_get_app_header_addr();
-    return fota_deserialize_header(header_in_curr_fw, fota_get_header_size(), header_info);
-}
-#endif
 
 /**
- * Read from current firmware.
+ * Read from the current firmware.
  *
  * \param[out] buf       Buffer to read into.
- * \param[in]  offset    Offset in firmware.
- * \param[in]  size      Size to read (bytes).
+ * \param[in]  offset    Offset in the firmware.
+ * \param[in]  size      Size to read in bytes.
  * \param[out] num_read  Number of read bytes.
- * \return FOTA_STATUS_SUCCESS on success.
+ * \return ::FOTA_STATUS_SUCCESS on success.
  */
 int fota_curr_fw_read(uint8_t *buf, size_t offset, size_t size, size_t *num_read);
 
 /**
- * Read digest from current firmware.
+ * Read the digest from the current firmware.
  *
  * \param[out]  buf     Buffer to read into.
- * \return FOTA_STATUS_SUCCESS on success.
+ * \return ::FOTA_STATUS_SUCCESS on success.
  */
 int fota_curr_fw_get_digest(uint8_t *buf);
 
 #ifdef __cplusplus
 }
 #endif
-#endif // MBED_CLOUD_CLIENT_FOTA_ENABLE
+#endif // defined(MBED_CLOUD_CLIENT_FOTA_ENABLE)
 
 #endif // __FOTA_CURR_FW_H_
